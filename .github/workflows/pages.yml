@@ -1,0 +1,173 @@
+name: Pages
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    name: Build site
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      pages: read
+    env:
+      PW_CHANNEL: chrome
+      CHROME_PATH: /usr/bin/google-chrome
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Read Pages configuration
+        id: pages
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+
+      - name: Install the pinned npm
+        run: |
+          set -euo pipefail
+          PINNED="$(node -p "require('./package.json').devEngines.packageManager.version")"
+          npm install -g "npm@${PINNED}"
+          test "$(npm --version)" = "${PINNED}"
+
+      - name: Install dependencies
+        run: npm ci --strict-peer-deps --engine-strict --no-audit --no-fund
+
+      # 1. Build dist/ with the report page still holding its placeholders.
+      - name: Build the site into dist/
+        run: npm run build
+        env:
+          SITE_GITHUB_TOKEN: ${{ github.token }}
+
+      # 2. The four gates. Each step fails the job on its own exit code.
+      - name: Accessibility (axe through Playwright)
+        run: npx playwright test
+      - name: HTML validity (Nu Html Checker)
+        run: |
+          mkdir -p reports
+          java -jar node_modules/vnu-jar/build/dist/vnu.jar --stdout --skip-non-html --format json dist/ > reports/vnu.json
+      - name: Links (lychee)
+        uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
+        with:
+          args: >-
+            --config lychee.toml
+            --root-dir ${{ github.workspace }}/dist
+            --remap 'https://mraryancode.github.io/ file://${{ github.workspace }}/dist/'
+            'dist/**/*.html'
+          format: json
+          output: reports/lychee/out.json
+          jobSummary: false
+          fail: true
+      - name: Performance (Lighthouse CI)
+        run: npx lhci autorun
+
+      # 3. Report numbers, then put them into the report page.
+      - name: Collect the quality numbers
+        run: node scripts/collect-quality.cjs reports dist reports/quality.json
+      - name: Inject the numbers into the report page
+        run: node scripts/inject-report.cjs reports/quality.json dist/report/index.html
+
+      # 4. Re-test the page that was changed. Nothing may change dist/ after this point.
+      - name: Re-check the injected report page (HTML and accessibility)
+        run: |
+          java -jar node_modules/vnu-jar/build/dist/vnu.jar --stdout --skip-non-html --format json dist/report/index.html > reports/vnu-final.json
+          npx playwright test --grep "report"
+      - name: Re-check the injected report page (links, offline)
+        uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
+        with:
+          args: >-
+            --offline --config lychee.toml
+            --root-dir ${{ github.workspace }}/dist
+            --remap 'https://mraryancode.github.io/ file://${{ github.workspace }}/dist/'
+            dist/report/index.html
+          format: json
+          output: reports/lychee/final.json
+          jobSummary: false
+          fail: true
+
+      # 5. Keep the raw reports even when a gate failed, then upload the folder that was judged.
+      - name: Upload the quality reports
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: quality-reports
+          path: |
+            reports/
+            .lighthouseci/
+          if-no-files-found: warn
+
+      - name: Upload the Pages artifact
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: dist
+
+  test:
+    name: Test site
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      CHROMIUM_PATH: /usr/bin/google-chrome
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+
+      - name: Install the pinned npm
+        run: |
+          set -euo pipefail
+          PINNED="$(node -p "require('./package.json').devEngines.packageManager.version")"
+          npm install -g "npm@${PINNED}"
+          test "$(npm --version)" = "${PINNED}"
+
+      - name: Install dependencies
+        run: npm ci --strict-peer-deps --engine-strict --no-audit --no-fund
+
+      # Builds its own development dist/ on this runner. Never uploaded.
+      - name: Run the tests (includes the hydration test)
+        run: npm test
+
+  deploy:
+    name: Deploy site
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: [build, test]
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

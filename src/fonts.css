@@ -1,0 +1,21 @@
+@font-face {
+  font-family: "Geist";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("@fontsource-variable/geist/files/geist-latin-wght-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Geist Mono";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("@fontsource-variable/geist-mono/files/geist-mono-latin-wght-normal.woff2") format("woff2");
+}
+
+/* The fallback family names are written by hand: fontaine rewrites only literal font-family declarations. */
+:root {
+  --font-sans: "Geist", "Geist fallback", system-ui, sans-serif;
+  --font-mono: "Geist Mono", "Geist Mono fallback", ui-monospace, monospace;
+}

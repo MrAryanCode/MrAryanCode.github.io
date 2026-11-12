@@ -1,0 +1,46 @@
+{
+  "name": "mraryancode-site",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=26.13.0"
+  },
+  "devEngines": {
+    "packageManager": {
+      "name": "npm",
+      "version": "12.2.2",
+      "onFail": "warn"
+    }
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test --test-concurrency=1 \"test/*.test.mjs\"",
+    "test:acceptance": "playwright test --config playwright.acceptance.config.cjs"
+  },
+  "dependencies": {
+    "@fontsource-variable/geist": "5.3.0",
+    "@fontsource-variable/geist-mono": "5.3.0",
+    "@fontsource/geist": "5.3.0",
+    "@fontsource/geist-mono": "5.3.0",
+    "satori": "0.63.2",
+    "sharp": "0.35.5",
+    "solid-js": "1.9.18"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "4.14.0",
+    "@lhci/cli": "0.16.0",
+    "@playwright/test": "1.65.0",
+    "axe-core": "4.14.0",
+    "fontaine": "1.0.3",
+    "playwright": "1.65.0",
+    "typescript": "7.0.2",
+    "vite": "8.3.7",
+    "vite-plugin-solid": "2.11.15",
+    "vnu-jar": "26.11.9"
+  },
+  "allowScripts": {
+    "vnu-jar@26.11.9": true
+  }
+}

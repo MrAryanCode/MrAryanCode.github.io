@@ -1,0 +1,6 @@
+[
+  { "file": "index.html", "path": "/" },
+  { "file": "projects/certway/index.html", "path": "/projects/certway/" },
+  { "file": "report/index.html", "path": "/report/" },
+  { "file": "404.html", "path": "/404.html" }
+]

@@ -1,0 +1,131 @@
+name: Refresh
+
+on:
+  schedule:
+    - cron: "41 * * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  refresh:
+    name: Refresh site
+    runs-on: ubuntu-26.04
+    # Backstop only. The wait step stops itself after WAIT_SECONDS and exits 1, so the job ends
+    # as "failure". A job that hits timeout-minutes ends as "cancelled", which may not notify.
+    # Keep timeout-minutes above WAIT_SECONDS / 60 by at least 10.
+    timeout-minutes: 140
+    permissions:
+      actions: write
+      contents: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TARGET_WORKFLOW: pages.yml
+      TARGET_REF: main
+      # 7800 s = 600 s queue + 2 x 60 min: the one running main run and this run's own dispatched run,
+      # each allowed at most test 30 + build 20 + deploy 10 minutes (the sum, as a safe upper bound).
+      WAIT_SECONDS: "7800"
+      POLL_SECONDS: "30"
+    steps:
+      - name: Keep this scheduled workflow enabled
+        run: gh api --method PUT "repos/${GITHUB_REPOSITORY}/actions/workflows/refresh.yml/enable"
+
+      - name: Dispatch the build
+        id: dispatch
+        run: |
+          set -euo pipefail
+          since="$(date -u -d '60 seconds ago' +%Y-%m-%dT%H:%M:%SZ)"
+          response="$(gh api --method POST \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/${TARGET_WORKFLOW}/dispatches" \
+            -f ref="${TARGET_REF}" -F return_run_details=true)"
+          run_id="$(jq -r '.workflow_run_id // empty' <<<"${response}")"
+          if [ -z "${run_id}" ]; then
+            echo "::warning::The dispatch response carried no run id; looking the run up by filter."
+            for _ in 1 2 3 4 5 6; do
+              sleep 10
+              candidates="$(gh api --method GET \
+                "repos/${GITHUB_REPOSITORY}/actions/workflows/${TARGET_WORKFLOW}/runs" \
+                -f event=workflow_dispatch -f branch="${TARGET_REF}" -f per_page=20 \
+                -f "created=>=${since}" \
+                --jq '[.workflow_runs[] | select(.triggering_actor.login == "github-actions[bot]") | .id] | map(tostring) | join(" ")')"
+              [ -n "${candidates}" ] && break
+            done
+            read -r -a found <<<"${candidates}"
+            if [ "${#found[@]}" -ne 1 ]; then
+              echo "::error::Expected exactly one dispatched run since ${since}, found ${#found[@]}: ${candidates:-none}"
+              exit 1
+            fi
+            run_id="${found[0]}"
+          fi
+          case "${run_id}" in
+            ''|*[!0-9]*) echo "::error::Not a run id: ${run_id}"; exit 1 ;;
+          esac
+          echo "Dispatched ${TARGET_WORKFLOW} on ${TARGET_REF}: run ${run_id}"
+          echo "run_id=${run_id}" >> "${GITHUB_OUTPUT}"
+
+      - name: Wait for the build and fail if it fails
+        env:
+          RUN_ID: ${{ steps.dispatch.outputs.run_id }}
+        run: |
+          set -euo pipefail
+          api="repos/${GITHUB_REPOSITORY}"
+          deadline=$(( $(date +%s) + WAIT_SECONDS ))
+          workflow_id="$(gh api "${api}/actions/workflows/${TARGET_WORKFLOW}" --jq '.id')"
+          current="${RUN_ID}"
+          hops=0
+          read_errors=0
+          first=1
+          while :; do
+            if line="$(gh api "${api}/actions/runs/${current}" \
+                 --jq '[.status, (.conclusion // "none"), .created_at, .updated_at, .event, (.head_branch // "none"), .workflow_id] | @tsv')"; then
+              read_errors=0
+              IFS=$'\t' read -r status conclusion created updated event branch wf <<<"${line}"
+              if [ "${first}" = 1 ]; then
+                if [ "${event}" != "workflow_dispatch" ] || [ "${branch}" != "${TARGET_REF}" ] || [ "${wf}" != "${workflow_id}" ]; then
+                  echo "::error::Run ${current} is not a dispatch of ${TARGET_WORKFLOW} on ${TARGET_REF}: event=${event} branch=${branch} workflow_id=${wf}"
+                  exit 1
+                fi
+                first=0
+              fi
+              echo "run ${current}: status=${status} conclusion=${conclusion}"
+              if [ "${status}" = "completed" ]; then
+                url="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${current}"
+                if [ "${conclusion}" = "success" ]; then
+                  echo "Run ${current} succeeded. ${url}"
+                  exit 0
+                fi
+                if [ "${conclusion}" != "cancelled" ]; then
+                  echo "::error::Run ${current} ended ${conclusion}. ${url}"
+                  exit 1
+                fi
+                # Cancelled. Replaced while pending means: no job ever existed, and a newer
+                # non-PR run of the workflow on the branch was created while this one was alive.
+                # A job cancelled by its own timeout has jobs, so that stays a failure.
+                job_count="$(gh api "${api}/actions/runs/${current}/jobs" --jq '.total_count')"
+                successor="$(gh api --method GET "${api}/actions/workflows/${TARGET_WORKFLOW}/runs" \
+                  -f branch="${TARGET_REF}" -f per_page=50 -f "created=>=${created}" \
+                  --jq "[.workflow_runs[] | select(.id != ${current} and .event != \"pull_request\" and ((.created_at | fromdateiso8601) <= ((\"${updated}\" | fromdateiso8601) + 10)))] | sort_by(.created_at) | last | .id // empty")"
+                hops=$(( hops + 1 ))
+                if [ "${job_count}" = "0" ] && [ -n "${successor}" ] && [ "${hops}" -le 5 ]; then
+                  echo "::notice::Run ${current} was replaced by run ${successor}; following it."
+                  current="${successor}"
+                  continue
+                fi
+                echo "::error::Run ${current} was cancelled and not replaced (jobs=${job_count}, successor=${successor:-none}, hops=${hops}). ${url}"
+                exit 1
+              fi
+            else
+              read_errors=$(( read_errors + 1 ))
+              echo "::warning::Reading run ${current} failed (${read_errors} in a row)."
+              if [ "${read_errors}" -ge 5 ]; then
+                echo "::error::Could not read run ${current} five times in a row."
+                exit 1
+              fi
+            fi
+            if [ "$(date +%s)" -ge "${deadline}" ]; then
+              echo "::error::Run ${current} did not finish within ${WAIT_SECONDS} s. https://github.com/${GITHUB_REPOSITORY}/actions/runs/${current}"
+              exit 1
+            fi
+            sleep "${POLL_SECONDS}"
+          done
