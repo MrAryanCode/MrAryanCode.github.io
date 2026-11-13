@@ -32,22 +32,39 @@ function strings(value, out = []) {
   return out;
 }
 
-async function moduleStrings(name) {
+async function load(name) {
   const file = join(contentDir, name);
   if (!existsSync(file)) return null;
-  return strings(await import(pathToFileURL(file).href));
+  return import(pathToFileURL(file).href);
 }
 
-const skillsStrings = await moduleStrings("skills.ts");
-if (skillsStrings === null) {
+const skillsModule = await load("skills.ts");
+if (skillsModule === null) {
   console.error(`no skills.ts in ${contentDir}`);
   process.exit(2);
 }
-const siteStrings = [...skillsStrings];
-for (const name of ["identity.ts", "contact.ts", "working.ts"]) siteStrings.push(...((await moduleStrings(name)) ?? []));
+const siteStrings = strings(skillsModule);
+for (const name of ["identity.ts", "contact.ts", "working.ts"]) {
+  const mod = await load(name);
+  if (mod) siteStrings.push(...strings(mod));
+}
 
-// Skill names: the strings of skills.ts, and every name of a string that lists names (`Go · React, Svelte`).
-const skillNames = new Set(skillsStrings.flatMap((s) => [s.trim(), ...s.split(/[,·]/).map((n) => n.trim())]));
+// Skill names, and only those: the entries of the `skills` arrays of the exported lists (a plain string, or an object
+// with a `text`), and every name of an exported string that lists names (`Go · React, Svelte`). Labels, URLs and
+// headings of skills.ts are not skill names.
+const skillNames = new Set();
+for (const value of Object.values(skillsModule)) {
+  if (typeof value === "string") {
+    if (/[,·]/.test(value)) value.split(/[,·]/).forEach((n) => skillNames.add(n.trim()));
+  } else if (Array.isArray(value)) {
+    for (const item of value) {
+      for (const skill of Array.isArray(item?.skills) ? item.skills : []) {
+        const text = typeof skill === "string" ? skill : skill?.text;
+        if (typeof text === "string") skillNames.add(text.trim());
+      }
+    }
+  }
+}
 
 const first = (re) => readme.match(re)?.[1]?.trim() ?? null;
 const facts = [

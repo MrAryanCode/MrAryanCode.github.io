@@ -59,6 +59,13 @@ test("check-profile-parity: covered stack exits 0, one extra name is missing and
     assert.doesNotMatch(bad.stdout, /stack: covered/);
     assert.doesNotMatch(bad.stdout, /stack: missing (TypeScript|Rust|SolidJS|Go|React|Svelte)$/m);
 
+    // A label or a URL of skills.ts is not a skill name: a README stack naming a repository label is missing.
+    const label = join(dir, "label.md");
+    writeFileSync(label, readmeWith("TypeScript, certway"));
+    const labelled = run(label, site);
+    assert.equal(labelled.status, 1, labelled.stdout + labelled.stderr);
+    assert.match(labelled.stdout, /^stack: missing certway$/m);
+
     // A shared fact that differs is printed `differs` and also exits 1.
     const moved = join(dir, "moved.md");
     writeFileSync(moved, readmeWith("TypeScript").replace("Based in Tehran (UTC+03:30).", "Based in Tehran (Iran time zone)."));

@@ -11,8 +11,9 @@ const pages = require('../../quality/pages.json');
 // Copy at step 3. When these are amended, keep the shapes below:
 //   The order of COPY_AT_STEP_3_SITE_CHECKS is the order of the report sections: unit tests, acceptance tests,
 //   accessibility, performance, HTML validation, links (design.md DS-09).
-//   COPY_AT_STEP_3_REPORT_LABELS: the dt labels { passed, skipped, flaky, pagesChecked, violations, assertionsPassed,
-//     documentsChecked, errors, warnings, linksFound, unique, checked, ok, broken, timedOut, excluded }.
+//   COPY_AT_STEP_3_REPORT_LABELS: the dt labels, the dd value templates and the notes, caption and column headers of
+//   the signed rows of design.md DS-00 and DS-09. The `Passed {p} of {t}` label of DS-00 is the dt `Passed` with the
+//   dd `{p} of {t}` (the mock of DS-09), and the dd of the acceptance count ends in `runs` because those counts are runs.
 const COPY_AT_STEP_3_REPORT_TITLE = 'Engineering report';
 const COPY_AT_STEP_3_REPORT_LEAD = 'How this site is built: the checks every deploy must pass, with the numbers from the build you are reading.';
 // The signed COPY_AT_STEP_3_SITE_CHECKS of src/content/identity.ts (text and file; the marker is not asserted here).
@@ -24,7 +25,32 @@ const COPY_AT_STEP_3_SITE_CHECKS = [
   { text: 'HTML validation (Nu Html Checker)', file: 'package.json' },
   { text: 'Link check (lychee)', file: '.github/workflows/pages.yml' },
 ];
-const COPY_AT_STEP_3_REPORT_LABELS = null;
+const COPY_AT_STEP_3_REPORT_LABELS = {
+  passed: 'Passed',
+  unitPassedValue: (p, t) => `${p} of ${t}`,
+  acceptancePassedValue: (p, t) => `${p} of ${t} runs`,
+  skipped: 'Skipped',
+  flaky: 'Flaky (passed on retry)',
+  acceptanceNote: 'Each test runs once in each browser, so these counts are runs.',
+  pagesChecked: 'Pages checked',
+  violations: 'Violations',
+  performanceNote: 'Median of 3 runs per page, mobile, simulated throttling.',
+  assertionsPassed: 'Assertions passed',
+  assertionsPassedValue: (p, t) => `${p} of ${t}`,
+  tableCaption: 'Per page, median run',
+  tableColumns: ['Page', 'Performance', 'Accessibility', 'LCP (ms)', 'TBT (ms)', 'CLS'],
+  documentsChecked: 'Documents checked',
+  errors: 'Errors',
+  warnings: 'Warnings',
+  linksFound: 'Links found',
+  unique: 'Unique',
+  checked: 'Checked',
+  ok: 'OK',
+  broken: 'Broken',
+  timedOut: 'Timed out',
+  excluded: 'Excluded by rule',
+  definedIn: 'Defined in',
+};
 
 const REPO = 'https://github.com/MrAryanCode/MrAryanCode.github.io';
 const sha = quality.commit;
@@ -58,18 +84,18 @@ async function checkReport(page) {
   const valueOf = (i, label) =>
     section(i).evaluate((el, text) => {
       const dt = [...el.querySelectorAll('dt')].find((d) => d.textContent.trim() === text);
-      return dt && dt.nextElementSibling ? dt.nextElementSibling.textContent.trim() : null;
+      return dt && dt.nextElementSibling ? dt.nextElementSibling.textContent.replace(/\s+/g, ' ').trim() : null;
     }, label);
 
   const u = quality.unitTests;
-  expect(await valueOf(0, labels.passed), 'unit tests: passed').toMatch(new RegExp(`^${group(u.passed)} of ${group(u.total)}\\b`));
+  expect(await valueOf(0, labels.passed), 'unit tests: passed').toBe(labels.unitPassedValue(group(u.passed), group(u.total)));
   expect(await valueOf(0, labels.skipped), 'unit tests: skipped').toBe(group(u.skipped));
 
   const a = quality.acceptanceTests;
-  expect(await valueOf(1, labels.passed), 'acceptance tests: passed').toMatch(new RegExp(`^${group(a.passed)} of ${group(a.total)}\\b`));
+  expect(await valueOf(1, labels.passed), 'acceptance tests: passed').toBe(labels.acceptancePassedValue(group(a.passed), group(a.total)));
   expect(await valueOf(1, labels.flaky), 'acceptance tests: flaky').toBe(group(a.flaky));
   expect(await valueOf(1, labels.skipped), 'acceptance tests: skipped').toBe(group(a.skipped));
-  await expect(section(1)).toContainText(/browser/i); // the note that each test runs once per browser, so the counts are runs
+  await expect(section(1), 'the note that the acceptance counts are runs').toContainText(labels.acceptanceNote);
 
   // The axe numbers sit under the accessibility check, and are never called tests.
   expect(await valueOf(2, labels.pagesChecked), 'accessibility: pages checked').toBe(group(quality.accessibility.pages.length));
@@ -77,7 +103,10 @@ async function checkReport(page) {
   expect(((await section(2).innerText()) || '').replace(/Defined in[\s\S]*$/, ''), 'the accessibility numbers are page checks, never tests').not.toMatch(/\btests?\b/i);
 
   const perf = quality.performance;
-  expect(await valueOf(3, labels.assertionsPassed), 'performance: assertions passed').toMatch(new RegExp(`^${group(perf.assertions.passed)} of ${group(perf.assertions.total)}\\b`));
+  expect(await valueOf(3, labels.assertionsPassed), 'performance: assertions passed').toBe(labels.assertionsPassedValue(group(perf.assertions.passed), group(perf.assertions.total)));
+  await expect(section(3), 'the note on how the Lighthouse runs are made').toContainText(labels.performanceNote);
+  await expect(section(3).locator('table caption')).toHaveText(labels.tableCaption);
+  expect((await section(3).locator('table thead th').allInnerTexts()).map((t) => t.trim()), 'Lighthouse table column headers').toEqual(labels.tableColumns);
   const rows = section(3).locator('table tbody tr');
   await expect(rows).toHaveCount(pages.length);
   for (const [i, entry] of pages.entries()) {
@@ -109,6 +138,7 @@ async function checkReport(page) {
     const link = section(i).locator(`a[href="${REPO}/blob/${sha}/${check.file}"]`);
     await expect(link, `Defined in link of section ${i}`).toHaveCount(1);
     await expect(link).toHaveText(check.file);
+    await expect(section(i), `the "${labels.definedIn}" label of section ${i}`).toContainText(labels.definedIn);
   }
 
   const text = (await page.locator('body').innerText()) || '';

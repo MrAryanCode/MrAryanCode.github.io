@@ -26,6 +26,7 @@ test('AT-04 the card is right before and after hydration', async ({ browser, bas
     await mockGithub(page);
     await page.goto('/');
     await expect(page.locator(`a[href="${REPO_URL}"]`).first()).toBeVisible();
+    await expect(page.locator('p[data-live-fail]'), 'the live-failure note exists in the card').toHaveCount(1);
     await expect(page.locator('p[data-live-fail]')).toBeHidden();
     await hydrated(page);
     const after = await readFacts(page);

@@ -21,6 +21,7 @@ for (const route of ROUTES) {
     await page.waitForTimeout(3000);
 
     const hasFacts = (await page.locator('[data-fact]').count()) > 0;
+    if (route === '/') expect(hasFacts, 'the home page holds the [data-fact] elements, so the live read is asserted').toBe(true);
     const foreign = requests.filter((r) => new URL(r.url).origin !== origin);
 
     if (hasFacts) {

@@ -18,12 +18,24 @@ let api;
 
 before(async () => {
   api = spawn(process.execPath, [join(root, "tools", "fixture-api.mjs"), join(root, "test", "fixtures"), String(API_PORT)], { cwd: root, stdio: "ignore" });
-  await sleep(500);
+  await waitForApi();
 });
 
 after(async () => {
   if (api.exitCode === null && api.signalCode === null) await new Promise((resolve) => { api.once("exit", resolve); api.kill(); });
 });
+
+// Polls the fixture API until it answers, instead of sleeping for a fixed time.
+async function waitForApi() {
+  for (let attempt = 0; attempt < 50; attempt++) {
+    const up = await new Promise((resolve) => {
+      get(`http://127.0.0.1:${API_PORT}/__stats`, { agent: false }, (res) => { res.resume(); resolve(res.statusCode === 200); }).on("error", () => resolve(false));
+    });
+    if (up) return;
+    await sleep(100);
+  }
+  throw new Error(`the fixture API did not answer on port ${API_PORT}`);
+}
 
 // A fresh connection each time (agent: false): the build above blocks this process for up to 15 s, and a pooled
 // keep-alive connection that the fixture API closed meanwhile made fetch fail with "other side closed".
@@ -54,7 +66,9 @@ const noOutputLeft = () => {
 const cases = [
   ["500 on both paths", "status=500", /answered 500/],
   ["429 on both paths", "status=429", /answered 429/],
-  ["301 on the repository path", `status=301&path=${REPO}&location=${encodeURIComponent("https://api.example.invalid/repos/MrAryanCode/certway")}`, /request failed/],
+  // The Location is the fixture API's own answer for the same repository (by id), so a build that followed the
+  // redirect would get a clean 200 and succeed; only redirect: "error" makes this case fail the build.
+  ["301 on the repository path", `status=301&path=${REPO}&location=${encodeURIComponent(`http://127.0.0.1:${API_PORT}/repositories/1317222266`)}`, /request failed/],
   ["404 on the release path", `status=404&path=${RELEASE}`, new RegExp(`${RELEASE.replaceAll("/", "\/")} answered 404`)],
   ["a repository with private: true", "private=1", /private must be false/],
   ["no answer for 16 s (past the 15 s limit)", "hang=16000", /request failed/],

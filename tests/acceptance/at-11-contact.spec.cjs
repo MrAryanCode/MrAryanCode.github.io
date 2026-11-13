@@ -27,7 +27,7 @@ for (const route of ROUTES) {
       } catch {
         return false;
       }
-      return /(^|[/._-])cv([/._-]|$)/i.test(path);
+      return /cv/i.test(path);
     });
     expect(cv, 'no link may point at a CV').toEqual([]);
 

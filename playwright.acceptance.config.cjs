@@ -11,6 +11,8 @@ module.exports = defineConfig({
   testDir: './tests/acceptance',
   // retries: 0 (P-07 C-6): a test that fails once ends `unexpected`, never `flaky`, so no retry can hide it.
   retries: 0,
+  // A committed test.only would silently skip the rest of the suite.
+  forbidOnly: true,
   // `list` keeps the console output, `json` feeds scripts/test-counts.cjs.
   // No PLAYWRIGHT_JSON_* environment variable may be set anywhere: it would change this reporter silently.
   reporter: [['list'], ['json', { outputFile: 'reports/tests/acceptance.json' }]],

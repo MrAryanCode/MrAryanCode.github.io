@@ -8,7 +8,8 @@ const { mockGithub } = require('./github-mock.cjs');
 const PERMALINK = /^https:\/\/github\.com\/MrAryanCode\/certway\/blob\/[0-9a-f]{40}\//;
 
 // The number of statements in src/content/case-study.ts. The module's export names are not fixed by the plan, so this
-// counts every plain object in the exports that has a string `path` field: one statement points at one file.
+// counts every plain object in the exports that has the string fields `section`, `statement` and `permalink` (the
+// entry shape of the data row "Case-study statements" in P-04 and of DS-08).
 // Node strips the types of the .ts file itself, so a child process can import it.
 function countStatements() {
   const file = path.join(__dirname, '..', '..', 'src', 'content', 'case-study.ts');
@@ -19,7 +20,7 @@ function countStatements() {
       const walk = (value) => {
         if (value === null || typeof value !== 'object' || seen.has(value)) return;
         seen.add(value);
-        if (!Array.isArray(value) && typeof value.path === 'string') count += 1;
+        if (!Array.isArray(value) && ['section', 'statement', 'permalink'].every((key) => typeof value[key] === 'string')) count += 1;
         for (const child of Object.values(value)) walk(child);
       };
       walk({ ...mod });
@@ -49,7 +50,7 @@ test('AT-10 every statement has one commit-pinned permalink', async ({ page }) =
 
   const source = countStatements();
   expect(source.ok, `src/content/case-study.ts could not be read: ${source.error}`).toBe(true);
-  expect(source.count, 'src/content/case-study.ts holds no statement (objects with a string path field)').toBeGreaterThan(0);
+  expect(source.count, 'src/content/case-study.ts holds no statement (objects with the string fields section, statement and permalink)').toBeGreaterThan(0);
   expect(total, 'the page must show one statement element per entry of src/content/case-study.ts').toBe(source.count);
 
   // No section heading without a statement under it.
