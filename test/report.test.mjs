@@ -260,7 +260,7 @@ describe("report built as on Actions (GITHUB_SERVER_URL, GITHUB_REPOSITORY, GITH
 
       test("the hydrated page prints no console message and no error", async () => {
         const { ctx, problems } = await open(browser, url);
-        assert.deepEqual(problems.filter((l) => l !== "warning: No available adapters."), []);
+        assert.deepEqual(problems.filter((l) => l !== "warning: No available adapters." && !l.startsWith('warning: [JavaScript Warning: "Failed to create WebGL context') && !l.startsWith('warning: [JavaScript Warning: "WebGPU is disabled by blocklist.')), []);
         await ctx.close();
       });
 
