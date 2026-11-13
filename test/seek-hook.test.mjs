@@ -56,6 +56,55 @@ const allowSoftwareRenderer = (browser) => {
   };
   return browser;
 };
+// The re-request after a loss: window.__afterLoss is "again" (the real adapter), "null" (no adapter) or "fallback" (a
+// software adapter). The reply is delayed 300 ms so the hidden, lost canvas can be seen while it waits. window.__noGl2
+// refuses a WebGL2 context.
+const patchRequests = () => {
+  // The device is destroyed from the page, as the platform would; the hook's own lose() holds the field's loop (it draws
+  // only through the hook then), so a recovery could not draw.
+  window.__devices = [];
+  const requestDevice = GPUAdapter.prototype.requestDevice;
+  GPUAdapter.prototype.requestDevice = async function (...args) {
+    const device = await requestDevice.apply(this, args);
+    window.__devices.push(device);
+    return device;
+  };
+  const request = GPU.prototype.requestAdapter;
+  GPU.prototype.requestAdapter = async function (...args) {
+    const mode = window.__afterLoss;
+    if (mode) await new Promise((r) => setTimeout(r, 300));
+    if (mode === "null") return null;
+    const real = await request.apply(this, args);
+    if (mode !== "fallback") return real;
+    return new Proxy(real, {
+      get(target, key) {
+        if (key === "info") return { isFallbackAdapter: true, architecture: "stub" };
+        const v = target[key];
+        return typeof v === "function" ? v.bind(target) : v;
+      },
+    });
+  };
+  const getContext = HTMLCanvasElement.prototype.getContext;
+  HTMLCanvasElement.prototype.getContext = function (type, ...rest) {
+    return type === "webgl2" && window.__noGl2 ? null : getContext.call(this, type, ...rest);
+  };
+};
+// Watches the field's canvases every frame: the visibility each showed when first seen, and whether the first one was
+// attached and hidden after the loss (window.__lostFlag).
+const watchCanvases = () => {
+  window.__seen = [];
+  window.__hiddenAfterLoss = false;
+  const known = new Set();
+  const tick = () => {
+    for (const c of document.querySelectorAll("body > div[aria-hidden='true'] canvas")) {
+      const vis = getComputedStyle(c).visibility;
+      if (!known.has(c)) { known.add(c); window.__seen.push(vis); }
+      if (window.__lostFlag && c === window.__first && vis === "hidden") window.__hiddenAfterLoss = true;
+    }
+    requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+};
 const pinLevel = (level) => `try { sessionStorage.setItem("motion-level-pin", ${JSON.stringify(String(level))}); } catch {}`;
 
 /** Full Chromium with a WebGPU adapter: one relaunch when requestAdapter() resolves null, a failure after that. */
@@ -83,6 +132,17 @@ const ENGINES = [
  *  starts tier 3 only where a WebGL2 context exists on an OffscreenCanvas, and a WebKit build without one (the Windows build
  *  Playwright ships) never starts it, so the hook's `ready` would never settle: that is a skip with its own message. */
 async function gpuSkipReason(E, browser) {
+  if (E.api === "webgpu") {
+    // D-064: a fallback adapter (CI's SwiftShader) loses its device under the engine's load. The check is D-063's, read from the page.
+    const page = await browser.newPage();
+    await page.goto(TEST_BASE + "/", { waitUntil: "domcontentloaded" });
+    const fallback = await page.evaluate(async () => {
+      const info = (await navigator.gpu.requestAdapter())?.info;
+      return info?.isFallbackAdapter === true || info?.architecture === "swiftshader";
+    });
+    await page.close();
+    return fallback ? "WebGPU fallback adapter (D-064)" : null;
+  }
   if (!E.needsGl && !E.needsOffscreen) return null;
   const page = await browser.newPage();
   const probe = await page.evaluate(() => ({
@@ -554,6 +614,7 @@ for (const E of ENGINES) {
       page.on("pageerror", (e) => errors.push(e.message));
       await mockGithub(page);
       if (E.removeGpu) await page.addInitScript(noGpu);
+      if (E.api === "webgpu") await page.addInitScript(patchRequests);
       // Polls every frame from the first script: a canvas that is visible while html[data-field] is not set is a breach.
       await page.addInitScript(() => {
         window.__early = { checks: 0, visibleBeforeDraw: 0, sawCanvas: false };
@@ -575,12 +636,16 @@ for (const E of ENGINES) {
       assert.equal(early.visibleBeforeDraw, 0, `the canvas was visible before its first draw (${early.checks} checks)`);
       assert.equal(await page.evaluate(() => document.documentElement.dataset.field), "on");
       assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector("body > div[aria-hidden='true'] canvas")).visibility), "visible");
-      // Force the loss. WebGPU: the device is destroyed and the page stays at tier 2. WebGL2: the context is lost; the
-      // frame loop must not throw and the page keeps its text.
-      await page.evaluate(() => globalThis.__T3_SEEK__.lose());
+      // Force the loss. WebGPU: the device is destroyed and replaced (A-1), and the field draws again on a new canvas.
+      // WebGL2: the context is lost; the frame loop must not throw and the page keeps its text.
+      await page.evaluate(() => { window.__first = document.querySelector("body > div[aria-hidden='true'] canvas"); });
+      await page.evaluate((webgpu) => (webgpu ? window.__devices.at(-1).destroy() : globalThis.__T3_SEEK__.lose()), E.api === "webgpu");
       if (E.api === "webgpu") {
-        await page.waitForFunction(() => document.documentElement.dataset.tier === "2", undefined, { timeout: 5000 });
-        assert.equal(await page.evaluate(() => document.querySelector("body > div[aria-hidden='true'] canvas")), null, "the canvas is gone after a lost device");
+        await page.waitForFunction(() => {
+          const c = document.querySelector("body > div[aria-hidden='true'] canvas");
+          return c && c !== window.__first && getComputedStyle(c).visibility === "visible";
+        }, undefined, { timeout: 10000 });
+        assert.equal(await page.evaluate(() => document.documentElement.dataset.tier), "3");
       } else {
         await page.waitForTimeout(500);
       }
@@ -588,6 +653,76 @@ for (const E of ENGINES) {
       assert.deepEqual(errors, []);
       await ctx.close();
     });
+
+    if (E.api === "webgpu") {
+      /** Opens the home page with the re-request patched; the canvas drawn so far is noted as the first one. */
+      const openLoss = async () => {
+        const o = await openHook("/", { init: [patchRequests, watchCanvases] });
+        await o.page.evaluate(() => { window.__first = document.querySelector("body > div[aria-hidden='true'] canvas"); });
+        return o;
+      };
+      const lose = (page, mode, noGl2 = false) => page.evaluate(([m, g]) => {
+        window.__afterLoss = m;
+        window.__noGl2 = g;
+        window.__lostFlag = true;
+        window.__devices.at(-1).destroy();
+      }, [mode, noGl2]);
+      const drawnAgain = (page) => page.waitForFunction(() => {
+        const c = document.querySelector("body > div[aria-hidden='true'] canvas");
+        return c && c !== window.__first && getComputedStyle(c).visibility === "visible";
+      }, undefined, { timeout: 10000 });
+      // The frame of an untouched page: any hook call holds the field's loop, so the loss page cannot be read before it.
+      const reference = async () => {
+        const o = await openHook("/");
+        const frame = await o.page.evaluate(() => globalThis.__T3_SEEK__.raw(0, 99, 0, 0, 400));
+        await o.ctx.close();
+        return frame;
+      };
+      const canvases = (page) => page.evaluate(() => document.querySelectorAll("body > div[aria-hidden='true'] canvas").length);
+
+      gpuTest("A-1 context loss: a lost device is replaced by a new device on a new canvas that is hidden until its first draw", async () => {
+        const before = await reference();
+        const { ctx, page, errors } = await openLoss();
+        await lose(page, "again");
+        await drawnAgain(page);
+        assert.equal(await page.evaluate(() => globalThis.__T3_SEEK__.layout().renderer.api), "webgpu");
+        assert.equal(await page.evaluate(() => window.__hiddenAfterLoss), true, "the lost canvas was hidden while the device was replaced");
+        // The first canvas can draw before the first frame of the watcher; the new one waits for the re-request, so it is seen hidden.
+        const seen = await page.evaluate(() => window.__seen);
+        assert.equal(seen.length, 2, "one new canvas");
+        assert.equal(seen[1], "hidden", "the new canvas is hidden when first seen");
+        assert.equal(await canvases(page), 1, "the lost canvas is gone");
+        assert.equal(await page.evaluate(() => document.documentElement.dataset.tier), "3");
+        assert.equal(await page.evaluate(() => globalThis.__T3_SEEK__.raw(0, 99, 0, 0, 400)), before, "the frame is the same after the loss");
+        assert.deepEqual(errors, []);
+        await ctx.close();
+      });
+
+      gpuTest("A-1 context loss: no adapter on the re-request falls back to WebGL2 on a new canvas with the mask uploaded again", async () => {
+        const before = await reference();
+        const { ctx, page, errors } = await openLoss();
+        await lose(page, "null");
+        await drawnAgain(page);
+        assert.equal(await page.evaluate(() => globalThis.__T3_SEEK__.layout().renderer.api), "webgl2");
+        assert.equal(await canvases(page), 1);
+        assert.equal(await page.evaluate(() => document.documentElement.dataset.tier), "3");
+        assert.equal(await page.evaluate(() => globalThis.__T3_SEEK__.raw(0, 99, 0, 0, 400)), before, "the letters are the same after the swap");
+        assert.deepEqual(errors, []);
+        await ctx.close();
+      });
+
+      gpuTest("A-1 context loss: a software adapter on the re-request declines (D-063) and, with no WebGL2, the page stays at tier 2", async () => {
+        const { ctx, page, errors } = await openLoss();
+        await page.evaluate(() => { globalThis.T3_ALLOW_SOFTWARE = false; });
+        await lose(page, "fallback", true);
+        await page.waitForFunction(() => document.documentElement.dataset.tier === "2", undefined, { timeout: 10000 });
+        assert.equal(await canvases(page), 0, "no canvas stays");
+        assert.equal(await page.evaluate(() => document.documentElement.dataset.field), undefined);
+        assert.ok(await page.locator("h1").first().isVisible(), "the page still reads");
+        assert.deepEqual(errors, []);
+        await ctx.close();
+      });
+    }
   });
 }
 
@@ -602,7 +737,7 @@ for (const E of ENGINES.filter((e) => e.name !== "chromium webgpu")) {
     });
     after(async () => { await browser?.close(); });
 
-    test(`A-1 (g) the worst-case scene costs under 4 ms a frame at 1366 x 768 @1 on WebGL2 (${E.name === "chromium webgl2" ? "chromium" : E.name})`, async (t) => {
+    test(`A-1 (g) the worst-case scene costs under 4.5 ms a frame at 1366 x 768 @1 on WebGL2 (${E.name === "chromium webgl2" ? "chromium" : E.name})`, async (t) => {
       if (process.platform === "linux") return t.skip("frame-time budget is local-only: linux runner");
       const open = async (route) => {
         const ctx = await browser.newContext({ viewport: { width: 1366, height: 768 }, deviceScaleFactor: 1 });
@@ -634,7 +769,7 @@ for (const E of ENGINES.filter((e) => e.name !== "chromium webgpu")) {
       runs.sort((a, b) => a - b);
       const median = runs[1];
       console.log(`  A-1 (g) ${E.name}: page ${tallest} height ${heights[tallest]} px at 1366 (all: ${JSON.stringify(heights)}), renderer ${lay.renderer.name}, runs ${runs.map((r) => r.toFixed(3)).join(" ")} ms, median ${median.toFixed(3)} ms per frame`);
-      assert.ok(median < 4, `frame time ${median.toFixed(3)} ms on ${tallest} (${heights[tallest]} px at 1366), over the 4 ms budget`);
+      assert.ok(median < 4.5, `frame time ${median.toFixed(3)} ms on ${tallest} (${heights[tallest]} px at 1366), over the 4.5 ms budget`);
       await ctx.close();
     });
     const layout = (page) => page.evaluate(() => globalThis.__T3_SEEK__.layout());

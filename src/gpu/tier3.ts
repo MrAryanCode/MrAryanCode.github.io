@@ -55,6 +55,8 @@ interface Run {
   ripples: Ripple[];
   drawn: boolean;
   lost: boolean;
+  recovering: boolean; // a lost WebGPU device is being replaced
+  gone: boolean; // finish(run, true) has run: nothing may be attached to it any more
   unsub: (() => void)[];
   lastCounts: { trails: number; ripples: number };
 }
@@ -387,6 +389,7 @@ function finish(run: Run, destroy: boolean): void {
     return;
   }
   if (kept === run) kept = null;
+  run.gone = true;
   run.backend.destroy();
   run.wrap.remove();
   run.style.remove();
@@ -478,7 +481,40 @@ async function startRun(root: HTMLElement, signal: AbortSignal): Promise<boolean
     if (!current) return;
     current.lost = true;
     reset();
-    if (current.backend.api === "webgpu") finish(current, true); // a lost device does not come back; the page stays at tier 2
+    if (current.backend.api === "webgpu") void recover(current);
+  };
+  // A-1 "Context loss": a lost WebGPU device is replaced from a new adapter and device; with no adapter the field falls
+  // back to WebGL2 on a new canvas, and the mask is re-uploaded. A re-requested software adapter declines (D-063), so the
+  // page then stays at tier 2. The canvas is hidden from the loss until its first draw, and the swap calls reset() (A-3).
+  const recover = async (run: Run): Promise<void> => {
+    if (run.recovering) return;
+    run.recovering = true;
+    run.canvas.style.visibility = "hidden";
+    let made: { backend: Backend; canvas: HTMLCanvasElement } | null = null;
+    try {
+      made = await createBackend(wrap, onLost, onRestored);
+    } catch {
+      made = null;
+    }
+    run.recovering = false;
+    if (run.gone) {
+      made?.backend.destroy();
+      made?.canvas.remove();
+      return;
+    }
+    if (!made) {
+      finish(run, true);
+      return;
+    }
+    run.backend.destroy();
+    run.canvas.remove();
+    run.backend = made.backend;
+    run.canvas = made.canvas;
+    run.geoKey = ""; // the new canvas has no size and no mask yet: the next draw sets both
+    run.rasterKey = "";
+    run.drawn = false;
+    run.lost = false;
+    reset();
   };
   const onRestored = (): void => {
     if (!current) return;
@@ -509,7 +545,7 @@ async function startRun(root: HTMLElement, signal: AbortSignal): Promise<boolean
     texts: [], textsDirty: true, range: document.createRange(), fontOk: false, geoKey: "", rasterKey: "", mode,
     tf0: page ? startTf(page, mode, introKey, playedThisLoad) : FORMATION_END, startTs: null, t0: 0, lastTf: -1,
     lastDraw: -1e9, prevScroll: scrollY, pending: false, pendingTs: 0, flip: false, raf: 0, trails: [], ripples: [],
-    drawn: false, lost: false, unsub: [], lastCounts: { trails: 0, ripples: 0 },
+    drawn: false, lost: false, recovering: false, gone: false, unsub: [], lastCounts: { trails: 0, ripples: 0 },
     ro: new ResizeObserver(() => { if (run.pending) drawFrame(run, run.pendingTs); }),
     mutation: new MutationObserver(() => { run.textsDirty = true; }),
   };
