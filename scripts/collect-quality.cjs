@@ -76,9 +76,24 @@ const html = {
   checker: 'Nu Html Checker ' + vnu.version,
 };
 
-// Test counts from the Playwright JSON reporter
+// Axe gate statistics from the Playwright JSON reporter of this job: one check per page.
 const pw = readJson(path.join(reportsDir, 'playwright.json')).stats;
-const tests = { passed: pw.expected, failed: pw.unexpected, flaky: pw.flaky, skipped: pw.skipped };
+const axeChecks = { passed: pw.expected, failed: pw.unexpected, flaky: pw.flaky, skipped: pw.skipped };
+
+// Unit and acceptance counts published by the test job (scripts/test-counts.cjs), saved as reports/tests/counts.json.
+const counts = readJson(path.join(reportsDir, 'tests', 'counts.json'));
+function checkCounts(group, keys) {
+  const g = counts[group];
+  if (!g) throw new Error(`reports/tests/counts.json has no ${group}`);
+  for (const k of [...keys, 'total']) {
+    if (!Number.isInteger(g[k]) || g[k] < 0) throw new Error(`counts.${group}.${k} is not a count: ${g[k]}`);
+  }
+  if (g.total === 0) throw new Error(`counts.${group}.total is 0`);
+  if (keys.reduce((n, k) => n + g[k], 0) !== g.total) throw new Error(`counts.${group} does not add up to its total`);
+  return Object.fromEntries([...keys, 'total'].map((k) => [k, g[k]]));
+}
+const unitTests = checkCounts('unit', ['passed', 'failed', 'skipped']);
+const acceptanceTests = checkCounts('acceptance', ['passed', 'failed', 'flaky', 'skipped']);
 
 const out = {
   generatedAt: new Date().toISOString(),
@@ -93,6 +108,8 @@ const out = {
   },
   links,
   html,
-  tests,
+  axeChecks,
+  unitTests,
+  acceptanceTests,
 };
 fs.writeFileSync(outFile, JSON.stringify(out, null, 2));

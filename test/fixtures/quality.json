@@ -1,0 +1,28 @@
+{
+  "generatedAt": "2026-11-01T12:00:00.000Z",
+  "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "runUrl": "https://github.com/MrAryanCode/MrAryanCode.github.io/actions/runs/1",
+  "accessibility": {
+    "pages": [
+      { "file": "index.html", "violations": 0, "violationNodes": 0, "rulesPassed": 41, "rulesNeedingReview": 2, "byImpact": {}, "engine": "axe-core 4.14.0" },
+      { "file": "projects/certway/index.html", "violations": 0, "violationNodes": 0, "rulesPassed": 42, "rulesNeedingReview": 1, "byImpact": {}, "engine": "axe-core 4.14.0" },
+      { "file": "report/index.html", "violations": 0, "violationNodes": 0, "rulesPassed": 43, "rulesNeedingReview": 3, "byImpact": {}, "engine": "axe-core 4.14.0" },
+      { "file": "404.html", "violations": 0, "violationNodes": 0, "rulesPassed": 40, "rulesNeedingReview": 0, "byImpact": {}, "engine": "axe-core 4.14.0" }
+    ],
+    "totalViolations": 0
+  },
+  "performance": {
+    "pages": [
+      { "file": "index.html", "lighthouseVersion": "13.0.0", "formFactor": "mobile", "throttlingMethod": "simulate", "scores": { "performance": 0.97, "accessibility": 1, "best-practices": 1, "seo": 1 }, "metrics": { "fcpMs": 1111, "lcpMs": 2222, "tbtMs": 33, "cls": 0.011, "speedIndexMs": 1444 } },
+      { "file": "projects/certway/index.html", "lighthouseVersion": "13.0.0", "formFactor": "mobile", "throttlingMethod": "simulate", "scores": { "performance": 0.96, "accessibility": 1, "best-practices": 1, "seo": 1 }, "metrics": { "fcpMs": 1112, "lcpMs": 2223, "tbtMs": 34, "cls": 0.012, "speedIndexMs": 1445 } },
+      { "file": "report/index.html", "lighthouseVersion": "13.0.0", "formFactor": "mobile", "throttlingMethod": "simulate", "scores": { "performance": 0.95, "accessibility": 1, "best-practices": 1, "seo": 1 }, "metrics": { "fcpMs": 1113, "lcpMs": 2224, "tbtMs": 35, "cls": 0.013, "speedIndexMs": 1446 } },
+      { "file": "404.html", "lighthouseVersion": "13.0.0", "formFactor": "mobile", "throttlingMethod": "simulate", "scores": { "performance": 0.94, "accessibility": 1, "best-practices": 1, "seo": 1 }, "metrics": { "fcpMs": 1114, "lcpMs": 2225, "tbtMs": 36, "cls": 0.014, "speedIndexMs": 1447 } }
+    ],
+    "assertions": { "total": 47, "passed": 47 }
+  },
+  "links": { "total": 913, "unique": 877, "checked": 871, "ok": 869, "broken": 2, "timeouts": 0, "excluded": 6 },
+  "html": { "documentsChecked": 4, "errors": 0, "warnings": 3, "checker": "Nu Html Checker 26.4.20" },
+  "axeChecks": { "passed": 4, "failed": 0, "flaky": 0, "skipped": 0 },
+  "unitTests": { "passed": 137, "failed": 0, "skipped": 3, "total": 140 },
+  "acceptanceTests": { "passed": 251, "failed": 0, "flaky": 0, "skipped": 7, "total": 258 }
+}
