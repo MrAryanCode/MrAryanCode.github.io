@@ -8,4 +8,4 @@ timeout = 20
 host_concurrency = 4
 host_request_interval = "250ms"
 accept = ["200..=299", "429"]
-exclude = ['^https://www\.linkedin\.com']
+exclude = ['^https://www\.linkedin\.com', '^https://github\.com/MrAryanCode/MrAryanCode\.github\.io/actions/runs/']
