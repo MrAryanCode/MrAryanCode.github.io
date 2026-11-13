@@ -106,7 +106,7 @@ async function checkReport(page) {
   expect(await valueOf(3, labels.assertionsPassed), 'performance: assertions passed').toBe(labels.assertionsPassedValue(group(perf.assertions.passed), group(perf.assertions.total)));
   await expect(section(3), 'the note on how the Lighthouse runs are made').toContainText(labels.performanceNote);
   await expect(section(3).locator('table caption')).toHaveText(labels.tableCaption);
-  expect((await section(3).locator('table thead th').allInnerTexts()).map((t) => t.trim()), 'Lighthouse table column headers').toEqual(labels.tableColumns);
+  expect((await section(3).locator('table th[scope="col"]').allInnerTexts()).map((t) => t.trim()), 'Lighthouse table column headers').toEqual(labels.tableColumns);
   const rows = section(3).locator('table tbody tr');
   await expect(rows).toHaveCount(pages.length);
   for (const [i, entry] of pages.entries()) {
