@@ -2,8 +2,10 @@
 import assert from "node:assert/strict";
 import { after, before, describe, test } from "node:test";
 import { chromium, firefox, webkit } from "playwright";
+import sharp from "sharp";
 import { mockGithub } from "../tests/acceptance/github-mock.cjs";
 import { BASE, buildAndServe, stopAll } from "./helpers.mjs";
+import { assertLayout } from "./layout-check.mjs";
 
 let browser;
 before(async () => {
@@ -82,13 +84,16 @@ for (const [engine, type] of Object.entries(ENGINES)) {
       await page.addInitScript(trackWorkers);
       await page.goto(BASE + "/", { waitUntil: "load" });
       if (reduce) return { ctx, page, requests, errors };
-      await page.waitForFunction(() => document.documentElement.dataset.tier === "2");
+      // Tier 3 loads after tier 2 where the page has a GPU context, so "reached tier 2" is a level of 2 or more.
+      await page.waitForFunction(() => Number(document.documentElement.dataset.tier) >= 2);
       const chunk = requests.find((r) => /\/assets\/tier2-[^/]*\.js$/.test(r));
       assert.ok(chunk, `the tier2 chunk was requested: ${requests.join(" ")}`);
       await page.evaluate(async (url) => {
-        const tier2 = await import(url);
+        const ns = await import(url);
+        // tier3 imports tier2, so the chunk's exports are mangled: onOutput is the one export that is not an async function.
+        const onOutput = Object.values(ns).find((v) => typeof v === "function" && v.constructor.name !== "AsyncFunction");
         const seen = { frames: 0, maxTrail: 0, last: null, empties: 0, afterEmpty: 0 };
-        tier2.onOutput((out) => {
+        onOutput((out) => {
           seen.frames += 1;
           seen.last = Array.from(out.subarray(0, 4));
           seen.maxTrail = Math.max(seen.maxTrail, out[2]);
@@ -184,6 +189,319 @@ for (const [engine, type] of Object.entries(ENGINES)) {
         await ctx.close();
       });
     }
+
+    // The 2 s watchdog: a worker that stops answering (terminated here) gets exactly one empty frame from tier 2, about 2 s
+    // after its last output, and nothing after it. The clock is the page's own performance.now().
+    test("the 2 s watchdog posts exactly one empty frame when the worker stalls", async () => {
+      const { ctx, page } = await openTier2();
+      await circle(page, 30);
+      await page.waitForFunction(() => window.__seen.frames >= 3);
+      await page.evaluate(() => {
+        window.__lastFrameAt = performance.now();
+        window.__emptyAt = [];
+        const chunkFrames = window.__seen;
+        const poll = () => {
+          if (chunkFrames.frames !== (window.__lastCount ?? -1)) { window.__lastCount = chunkFrames.frames; window.__lastFrameAt = performance.now(); }
+          if (chunkFrames.empties > window.__emptyAt.length) window.__emptyAt.push(performance.now());
+          requestAnimationFrame(poll);
+        };
+        poll();
+        window.__workers[0].terminate();
+      });
+      await page.waitForFunction(() => window.__emptyAt.length >= 1, undefined, { timeout: 6000 });
+      await page.waitForTimeout(2500);
+      const wd = await page.evaluate(() => ({ empties: window.__seen.empties, afterEmpty: window.__seen.afterEmpty, gap: window.__emptyAt[0] - window.__lastFrameAt }));
+      assert.equal(wd.empties, 1, "exactly one empty frame");
+      assert.equal(wd.afterEmpty, 0, "no frame after the empty one");
+      assert.ok(wd.gap >= 1700 && wd.gap <= 3500, `the empty frame came ${wd.gap.toFixed(0)} ms after the last output (watchdog 2 s)`);
+      await ctx.close();
+    });
+
+    // A-1 (e), D-051, D-053 item 4: no text moves independently of the document, outside the two exceptions.
+    for (const [name, path] of [["home", "/"], ["certway", "/projects/certway/"], ["report", "/report/"], ["404", "/nope/x"]]) {
+      test(`A-1 (e) layout check: ${name}`, async () => {
+        const ctx = await own.newContext({ viewport: { width: 1366, height: 768 } });
+        const page = await ctx.newPage();
+        await mockGithub(page);
+        await page.goto(BASE + path, { waitUntil: "load" });
+        await page.waitForFunction(() => Number(document.documentElement.dataset.tier) >= 2);
+        await assertLayout(page, `${engine} ${path}`);
+        await ctx.close();
+      });
+    }
+  });
+}
+
+// ---- Tier 3 (A-1, A-2, A-3, T-018), in the three engines, on the production build (no hook) ----
+// Tier 3 is detected from html[data-tier] ("3" once the field has drawn), never from the console, whose WebGL warnings the
+// other suites filter. Firefox on a runner has no WebGL context: its GPU cases skip with the message below.
+
+/** Records every rise of the stored step-down level with the page's own clock (onLevel is not reachable by name: the shared
+ *  chunks' exports are mangled), so the timeline cases compare timestamps taken in the page, never read from Node. */
+const trackSteps = () => {
+  window.__steps = [];
+  let seen = 0;
+  const set = Storage.prototype.setItem;
+  Storage.prototype.setItem = function (k, v) {
+    if (k === "motion-level") {
+      let level = null;
+      try { level = JSON.parse(v).level; } catch { /* not ours */ }
+      if (typeof level === "number" && level > seen) { seen = level; window.__steps.push({ at: performance.now(), level }); }
+    }
+    return set.call(this, k, v);
+  };
+};
+const CANVAS = "body > div[aria-hidden='true'] canvas";
+const TRACE = "trace:20fps";
+// The centre-row brightness the tracer adds in the left margin, in 0-255 units; calibrated from the measured values.
+const TRACER_MIN = 3;
+
+/** The left margin's mean brightness on the viewport's centre rows minus on rows 70 to 120 px above and below: the reading
+ *  tracer (kind 5, at the centre of the viewport) is the only thing that lifts the centre rows. Mean of three screenshots. */
+async function tracerExcess(page) {
+  const lum = async () => {
+    const { data, info } = await sharp(await page.screenshot({ clip: { x: 0, y: 0, width: 200, height: 768 } })).raw().toBuffer({ resolveWithObject: true });
+    const row = (y) => { let sum = 0; for (let x = 0; x < info.width; x++) { const o = (y * info.width + x) * info.channels; sum += data[o] + data[o + 1] + data[o + 2]; } return sum / (3 * info.width); };
+    const range = (a, b) => Array.from({ length: b - a }, (_, k) => a + k);
+    const mean = (ys) => ys.reduce((a, y) => a + row(y), 0) / ys.length;
+    return mean(range(372, 396)) - mean([...range(384 - 120, 384 - 70), ...range(384 + 70, 384 + 120)]);
+  };
+  let sum = 0;
+  for (let k = 0; k < 3; k++) { sum += await lum(); await page.waitForTimeout(150); }
+  return sum / 3;
+}
+
+for (const [engine, type] of Object.entries(ENGINES)) {
+  describe(`tier 3 in ${engine}`, () => {
+    let own;
+    let skipReason = null;
+    before(async () => {
+      own = await type.launch({ headless: true, executablePath: engine === "chromium" ? process.env.CHROMIUM_PATH || undefined : undefined });
+      // Firefox on a runner has no WebGL context. The loader starts tier 3 only where an OffscreenCanvas gives WebGL2, so a
+      // WebKit build without one (the Windows build Playwright ships) never starts it: both are skips with their own message.
+      const page = await own.newPage();
+      const probe = await page.evaluate(() => ({
+        gl: !!document.createElement("canvas").getContext("webgl2"),
+        offscreen: typeof OffscreenCanvas !== "undefined" && new OffscreenCanvas(1, 1).getContext("webgl2") !== null,
+      }));
+      await page.close();
+      if (engine === "firefox" && !probe.gl) skipReason = "no WebGL2 context: firefox";
+      else if (engine === "webkit" && !probe.offscreen) skipReason = "no OffscreenCanvas WebGL2: webkit";
+    });
+    after(async () => { await own?.close(); });
+
+    /** A case that needs the field loop: skipped in Firefox when the browser has no WebGL2 context. */
+    const gpuTest = (name, fn) => test(`${name} (${engine})`, async (t) => {
+      if (skipReason) return t.skip(skipReason);
+      await fn(t);
+    });
+
+    /** `pin` is the motion-level-pin value (undefined: none). `field()` waits for tier 3 and explains a failure. */
+    async function openField({ pin, route = "/", reduce = false } = {}) {
+      const ctx = await own.newContext({ viewport: { width: 1366, height: 768 }, reducedMotion: reduce ? "reduce" : "no-preference" });
+      const page = await ctx.newPage();
+      const errors = [];
+      const requests = [];
+      page.on("pageerror", (e) => errors.push(e.message));
+      page.on("request", (r) => requests.push(new URL(r.url()).pathname));
+      await mockGithub(page);
+      if (pin !== undefined) await page.addInitScript(pinLevel(pin));
+      await page.addInitScript(trackSteps);
+      await page.goto(BASE + route, { waitUntil: "load" });
+      const field = async () => {
+        try {
+          await page.waitForFunction(() => document.documentElement.dataset.tier === "3", undefined, { timeout: 25000 });
+        } catch {
+          throw new Error(`tier 3 did not start: html[data-tier] is "${await page.evaluate(() => document.documentElement.dataset.tier)}"; page errors: ${errors.join("; ")}`);
+        }
+      };
+      return { ctx, page, errors, requests, field };
+    }
+
+    gpuTest("the loader reaches tier 3: the canvas draws, the still texture is hidden", async () => {
+      const { ctx, page, errors, field } = await openField({ pin: 0 });
+      await field();
+      assert.equal(await page.evaluate(() => document.documentElement.dataset.field), "on");
+      assert.equal(await page.evaluate((c) => getComputedStyle(document.querySelector(c)).visibility, CANVAS), "visible");
+      assert.equal(await page.evaluate(() => getComputedStyle(document.body, "::before").display), "none", "the still look is off while the field draws");
+      assert.deepEqual(errors, []);
+      await ctx.close();
+    });
+
+    // A-3 (e): the step-down to rank 7 removes the field for the visit.
+    gpuTest("A-3 (e) unpinned at trace:20fps the canvas is removed after rank 7 and the next navigation has no field", async () => {
+      const { ctx, page, field } = await openField({ pin: TRACE });
+      await field();
+      assert.equal(await page.evaluate((c) => document.querySelector(c) !== null, CANVAS), true);
+      await page.waitForFunction((c) => document.querySelector(c) === null, CANVAS, { timeout: 90000 });
+      assert.equal(await page.evaluate(() => JSON.parse(sessionStorage.getItem("motion-level")).level), 7, "motion-level 7 is stored");
+      assert.notEqual(await page.evaluate(() => getComputedStyle(document.body, "::before").display), "none", "the still texture is shown");
+      assert.equal(await page.evaluate(() => window.__steps.at(-1).level), 7);
+      // The same tab, a page that would play a formation: no canvas, no field flag, no second intro.
+      await page.goto(BASE + "/nope/x", { waitUntil: "load" });
+      await page.waitForFunction(() => Number(document.documentElement.dataset.tier) >= 2);
+      await page.waitForTimeout(1500);
+      assert.equal(await page.evaluate((c) => document.querySelector(c), CANVAS), null, "no canvas on the next navigation");
+      assert.equal(await page.evaluate(() => document.documentElement.dataset.field), undefined);
+      assert.equal(await page.evaluate(() => document.documentElement.dataset.tier), "2");
+      await ctx.close();
+    });
+
+    // A-3 (f): a hidden-then-visible tab, and pause then play, cause no step. Timeline (CR10-O3): wait for a step, 1.5 s
+    // after it hide (or pause), 1 s later show (or play); no step may fall between the hide and 2 s after the show. All times
+    // are the page's performance.now(); the controller steps every 2.5 s at trace:20fps, so a missed reset steps inside the window.
+    for (const kind of ["hidden", "paused"]) {
+      gpuTest(`A-3 (f) ${kind === "hidden" ? "a hidden then visible tab" : "pause then play"} causes no step`, async () => {
+        const { ctx, page, field } = await openField({ pin: TRACE });
+        await field();
+        await page.waitForFunction(() => window.__steps.length >= 1, undefined, { timeout: 15000 });
+        const run = await page.evaluate(async (kind) => {
+          const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+          const firstStep = window.__steps[window.__steps.length - 1].at;
+          const visibility = (state) => {
+            Object.defineProperty(document, "visibilityState", { configurable: true, get: () => state });
+            Object.defineProperty(document, "hidden", { configurable: true, get: () => state === "hidden" });
+            document.dispatchEvent(new Event("visibilitychange"));
+          };
+          await wait(Math.max(0, firstStep + 1500 - performance.now()));
+          const off = performance.now();
+          if (kind === "hidden") visibility("hidden"); else document.querySelector(".pause").click();
+          await wait(1000);
+          const on = performance.now();
+          if (kind === "hidden") visibility("visible"); else document.querySelector(".pause").click();
+          await wait(on + 4800 - performance.now());
+          return { off, on, steps: window.__steps.map((s) => s.at) };
+        }, kind);
+        const inside = run.steps.filter((at) => at > run.off && at <= run.on + 2000);
+        const shown = run.steps.map((a) => a.toFixed(0));
+        assert.deepEqual(inside, [], `no step between the ${kind === "hidden" ? "hide" : "pause"} (${run.off.toFixed(0)}) and 2 s after the ${kind === "hidden" ? "visible" : "play"} moment (${run.on.toFixed(0)}): steps ${shown}`);
+        assert.ok(run.steps.some((at) => at > run.on + 2000), `the controller steps again after the reset: steps ${shown}, back at ${run.on.toFixed(0)}`);
+        assert.ok(run.steps.length < 7, "the case ends before rank 7");
+        await ctx.close();
+      });
+    }
+
+    // Moved from T-017 (CR5-O4): the wake keeps 16 trail points below level 2 and 6 from level 2, the change arriving
+    // through onLevel while the field loop feeds the controller.
+    gpuTest("the pointer wake drops from 16 to 6 trail points when the level steps to 2 (trace:20fps)", async () => {
+      const { ctx, page, requests, field } = await openField({ pin: TRACE });
+      await field();
+      const chunk = requests.find((r) => /\/assets\/tier2-[^/]*\.js$/.test(r));
+      assert.ok(chunk, "the tier2 chunk was requested");
+      await page.evaluate(async (url) => {
+        const ns = await import(url);
+        const onOutput = Object.values(ns).find((v) => typeof v === "function" && v.constructor.name !== "AsyncFunction");
+        window.__trails = [];
+        onOutput((out) => { window.__trails.push({ at: performance.now(), n: out[2] }); });
+      }, chunk);
+      for (let i = 0; i < 2400; i++) {
+        const a = i / 8;
+        await page.mouse.move(683 + 250 * Math.cos(a), 400 + 200 * Math.sin(a));
+        await page.waitForTimeout(16);
+        const done = await page.evaluate(() => { const s = window.__steps.find((x) => x.level >= 2); return !!s && performance.now() > s.at + 1500; });
+        if (done) break;
+      }
+      const r = await page.evaluate(() => {
+        const lv2 = window.__steps.find((s) => s.level >= 2).at;
+        const before = window.__trails.filter((f) => f.at < lv2 - 100).map((f) => f.n);
+        const after = window.__trails.filter((f) => f.at > lv2 + 500).map((f) => f.n);
+        return { before: Math.max(0, ...before), after: Math.max(0, ...after), levels: window.__steps.map((s) => s.level) };
+      });
+      assert.equal(r.before, 16, `below level 2 the wake reaches 16 points (steps ${r.levels})`);
+      assert.equal(r.after, 6, "from level 2 the wake keeps 6");
+      await ctx.close();
+    });
+
+    // A-2 (b): no canvas and no key under reduced motion, and at level 7.
+    test(`reduced motion and pinned level 7: no canvas, no intro key (${engine})`, async () => {
+      {
+        const { ctx, page } = await openField({ reduce: true });
+        await page.waitForFunction(() => document.documentElement.dataset.tier === "0");
+        await page.waitForTimeout(800);
+        assert.equal(await page.evaluate((c) => document.querySelector(c), CANVAS), null);
+        assert.equal(await page.evaluate(() => sessionStorage.getItem("motion-intro")), null);
+        await ctx.close();
+      }
+      {
+        const { ctx, page } = await openField({ pin: 7 });
+        await page.waitForFunction(() => Number(document.documentElement.dataset.tier) >= 2);
+        await page.waitForTimeout(800);
+        assert.equal(await page.evaluate((c) => document.querySelector(c), CANVAS), null);
+        assert.equal(await page.evaluate(() => sessionStorage.getItem("motion-intro")), null);
+        assert.equal(await page.evaluate(() => document.documentElement.dataset.tier), "2");
+        await ctx.close();
+      }
+    });
+
+    // Pause hides the field and brings the still texture back; Play returns the field (the data-field flag too).
+    gpuTest("pause hides the field and play brings it back", async () => {
+      const { ctx, page, field } = await openField({ pin: 0 });
+      await field();
+      await page.evaluate(() => document.querySelector(".pause").click());
+      await page.waitForFunction(() => document.documentElement.dataset.field === undefined);
+      assert.equal(await page.evaluate(() => document.documentElement.dataset.tier), "0");
+      assert.equal(await page.evaluate((c) => getComputedStyle(document.querySelector(c).parentElement).display, CANVAS), "none");
+      assert.notEqual(await page.evaluate(() => getComputedStyle(document.body, "::before").display), "none", "the still texture is back");
+      await page.evaluate(() => document.querySelector(".pause").click());
+      await field();
+      await page.waitForFunction(() => document.documentElement.dataset.field === "on");
+      assert.equal(await page.evaluate((c) => getComputedStyle(document.querySelector(c).parentElement).display, CANVAS), "block");
+      await ctx.close();
+    });
+
+    // P-12 / DV-02.5: the reading tracer sits at the centre of the viewport in the case study's margins.
+    describe("the reading tracer", () => {
+      /** Scrolls the case study with the wheel until the centre row is inside the reading column. */
+      async function scrollIntoReading(page) {
+        const top = await page.evaluate(() => document.querySelector(".reading").getBoundingClientRect().top + scrollY);
+        await page.mouse.move(683, 400);
+        for (let k = 0; k < 20 && (await page.evaluate(() => scrollY)) < top + 500; k++) {
+          await page.mouse.wheel(0, 400);
+          await page.waitForTimeout(120);
+        }
+        await page.waitForTimeout(500);
+      }
+
+      gpuTest("is drawn while scrolling", async () => {
+        const { ctx, page, field } = await openField({ pin: 0, route: "/projects/certway/" });
+        await field();
+        await scrollIntoReading(page);
+        const on = await tracerExcess(page);
+        console.log(`  tracer ${engine}: centre-row excess ${on.toFixed(2)}`);
+        assert.ok(on > TRACER_MIN, `the tracer lifts the centre rows by ${on.toFixed(2)}`);
+        await ctx.close();
+      });
+
+      gpuTest("its term is 0 from rank 5 (pinned)", async () => {
+        const { ctx, page, field } = await openField({ pin: 5, route: "/projects/certway/" });
+        await field();
+        await scrollIntoReading(page);
+        const off = await tracerExcess(page);
+        console.log(`  tracer ${engine} pinned 5: centre-row excess ${off.toFixed(2)}`);
+        assert.ok(off < TRACER_MIN / 3, `no tracer at rank 5: excess ${off.toFixed(2)}`);
+        await ctx.close();
+      });
+
+      gpuTest("is absent while paused", async () => {
+        const { ctx, page, field } = await openField({ pin: 0, route: "/projects/certway/" });
+        await field();
+        await scrollIntoReading(page);
+        await page.evaluate(() => document.querySelector(".pause").click());
+        await page.waitForFunction(() => document.documentElement.dataset.field === undefined);
+        const off = await tracerExcess(page);
+        assert.ok(off < TRACER_MIN / 3, `no tracer while paused: excess ${off.toFixed(2)}`);
+        await ctx.close();
+      });
+
+      test(`is absent under reduced motion (${engine})`, async () => {
+        const { ctx, page } = await openField({ reduce: true, route: "/projects/certway/" });
+        await page.waitForFunction(() => document.documentElement.dataset.tier === "0");
+        await scrollIntoReading(page);
+        const off = await tracerExcess(page);
+        assert.ok(off < TRACER_MIN / 3, `no tracer under reduced motion: excess ${off.toFixed(2)}`);
+        await ctx.close();
+      });
+    });
   });
 }
 

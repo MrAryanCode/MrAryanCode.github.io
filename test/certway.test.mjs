@@ -137,8 +137,8 @@ test("no section heading stands without a statement, and the probes add no headi
   assert.equal([...body.matchAll(/<h2[ >]/g)].length, SIGNED.length, "only the six signed h2 exist");
   for (const s of sections(page())) assert.ok(s.items.length > 0, `${s.heading} has a statement`);
   assert.equal([...body.matchAll(/<h[3-6][ >]/g)].length, 0);
-  // The probe mounts stay (CR2-B4): their hooks are still in the markup.
-  assert.ok(body.includes("data-gpu-status"));
+  // The probe mount is gone (T-018): the field is a canvas behind the page, made by tier 3 after hydration.
+  assert.ok(!body.includes("data-gpu-status"));
 });
 
 test("markup hooks of D-051: field kind 7 on the band, 5 on the body, scan on each h2 row", () => {

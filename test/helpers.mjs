@@ -4,6 +4,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { setTimeout as sleep } from "node:timers/promises";
+import { chromium } from "playwright";
 
 export const root = dirname(dirname(fileURLToPath(import.meta.url)));
 export const API_PORT = 4611;
@@ -62,3 +63,17 @@ export async function stopAll() {
     c.kill();
   })));
 }
+
+/**
+ * Launches full Chromium (channel "chromium", new headless mode), the build that gives WebGPU an adapter and draws WebGL2
+ * through ANGLE on a hardware GPU. `webgpu` adds --enable-unsafe-webgpu; without it the build has no WebGPU adapter at the
+ * flag's default and tier 3 draws WebGL2. CHROMIUM_FULL_PATH, when set, names the executable (a local machine whose installed
+ * Chromium revision is not the one Playwright pins); CI leaves it unset.
+ */
+export const launchFullChromium = ({ webgpu = false } = {}) =>
+  chromium.launch({
+    headless: true,
+    channel: "chromium",
+    executablePath: process.env.CHROMIUM_FULL_PATH || undefined,
+    args: webgpu ? ["--enable-unsafe-webgpu"] : [],
+  });

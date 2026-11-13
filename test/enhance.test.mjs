@@ -61,12 +61,14 @@ const gpuCases = [
 for (const c of gpuCases) {
   test(`GPU layer: ${c.name}`, async () => {
     const { ctx, page, requests } = await open("/projects/certway/", { init: c.init, route: c.route });
-    await page.waitForFunction((src) => new RegExp(src).test(document.querySelector("[data-gpu-status]").textContent), c.text.source);
+    // Where WebGL2 exists (headless Chromium) a failed or absent WebGPU leaves tier 3 running on WebGL2; a stub that makes
+    // every context fake leaves tier 2.
+    await page.waitForFunction((want) => document.documentElement.dataset.tier === want, c.chunk ? "2" : "3");
     assert.equal(requests.some((r) => /\/assets\/layer-.*\.js$/.test(r)), c.chunk, `layer chunk requested: ${requests.join(" ")}`);
     assert.ok((await page.locator("main h1").innerText()).length > 0, "the page is readable");
     await page.waitForFunction(() => document.documentElement.dataset.tier);
     const { tier } = await state(page);
-    assert.ok(Number(tier) < 3, `dataset.tier is ${tier}`);
+    assert.equal(tier, c.chunk ? "2" : "3", `dataset.tier is ${tier}`);
     await ctx.close();
   });
 }
@@ -79,9 +81,9 @@ test("the loader starts tier 1 and creates the pause button before Message me", 
     })],
   });
   await page.waitForSelector("button.pause");
-  await page.waitForFunction(() => document.documentElement.dataset.tier === "2");
+  await page.waitForFunction(() => document.documentElement.dataset.tier === "3");
   assert.equal(tier1Requests(requests).length, 1, `tier 1 requested: ${requests.join(" ")}`);
-  assert.deepEqual(await state(page), { label: "Pause motion", pressed: "false", motion: null, tier: "2", stored: null });
+  assert.deepEqual(await state(page), { label: "Pause motion", pressed: "false", motion: null, tier: "3", stored: null });
   const order = await page.evaluate(() => [...document.querySelectorAll("header a, header button")].map((el) => el.textContent.trim()));
   assert.deepEqual(order.slice(-2), ["Pause motion", "Message me"]);
   assert.deepEqual(logged(logs), []);
@@ -116,8 +118,8 @@ test("Pause toggles the label and aria-pressed, aborts the signal once and write
   const { tier: _playTier, ...played } = await state(page);
   assert.deepEqual(played, { label: "Pause motion", pressed: "false", motion: null, stored: null });
   await page.waitForFunction((n) => window.__tierWrites > n, writesBefore);
-  await page.waitForFunction(() => document.documentElement.dataset.tier === "2");
-  assert.equal((await state(page)).tier, "2", "Play starts tier 2");
+  await page.waitForFunction(() => document.documentElement.dataset.tier === "3");
+  assert.equal((await state(page)).tier, "3", "Play starts tier 3");
   assert.equal(await page.evaluate(() => window.__aborts), abortsBefore + 1, "Play aborts nothing");
   await ctx.close();
 });
@@ -133,8 +135,8 @@ test("motion-paused = 1 starts no tier and creates the button as Play motion; Pl
   await page.locator("button.pause").click();
   const { tier: _playTier, ...played } = await state(page);
   assert.deepEqual(played, { label: "Pause motion", pressed: "false", motion: null, stored: null });
-  await page.waitForFunction(() => document.documentElement.dataset.tier === "2");
-  assert.equal((await state(page)).tier, "2", "Play starts tier 2");
+  await page.waitForFunction(() => document.documentElement.dataset.tier === "3");
+  assert.equal((await state(page)).tier, "3", "Play starts tier 3");
   await page.waitForTimeout(500);
   assert.equal(tier1Requests(requests).length, 1, "Play requested tier 1");
   await ctx.close();
@@ -153,8 +155,8 @@ test("blocked sessionStorage: the page reads, the button works for the page view
   await button.click();
   const { tier: _playTier, ...played } = await state(page);
   assert.deepEqual(played, { label: "Pause motion", pressed: "false", motion: null, stored: "blocked" });
-  await page.waitForFunction(() => document.documentElement.dataset.tier === "2");
-  assert.equal((await state(page)).tier, "2", "Play starts tier 2");
+  await page.waitForFunction(() => document.documentElement.dataset.tier === "3");
+  assert.equal((await state(page)).tier, "3", "Play starts tier 3");
   assert.deepEqual(logged(logs), [], "no console message and no page error");
   await ctx.close();
 });
