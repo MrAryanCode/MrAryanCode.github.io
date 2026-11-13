@@ -121,12 +121,136 @@ test("the shared chrome: skip link first, identity link to /, Message me, the fo
   }
 });
 
-test("facts are in the prerendered HTML and stamped with a read time", () => {
-  // The certway page's own facts line goes with DS-08 (T-012); T-012 asserts that page in test/certway.test.mjs.
-  for (const f of ["index.html"]) {
-    const h = html(f);
-    assert.ok(h.includes(">v1.0.1</a>") && h.includes("<dd>MIT</dd>") && h.includes("<dd>3</dd>"));
-    assert.match(h, /<time data-read-at datetime="\d{4}-\d\d-\d\dT[\d:.]+Z">\d{4}-\d\d-\d\d \d\d:\d\d UTC<\/time>/);
+// Home page helpers: the page's `main` without Solid's markers, a page's opening tags, and one tag's attributes.
+const homeMain = () => /<main[^>]*>(.*)<\/main>/s.exec(plain("index.html"))[1];
+const openTags = (h, name) => [...h.matchAll(new RegExp(`<${name}\\b[^>]*>`, "g"))].map((m) => m[0]);
+const hasAttr = (tag, name, value) => (value === undefined ? new RegExp(`\\s${name}(?=[\\s=>/])`).test(tag) : tag.includes(` ${name}="${value}"`));
+const dataFx = (tag) => (/\sdata-fx="([^"]*)"/.exec(tag)?.[1] ?? "").split(" ").filter(Boolean);
+const stripTags = (h) => h.replace(/<[^>]*>/g, "").replace(/\s+/g, " ").trim();
+// The one element that carries data-fact="<name>": its opening tag and its inner HTML.
+const factElement = (h, name) => {
+  const m = new RegExp(`(<(\\w+)\\b[^>]*\\sdata-fact="${name}"[^>]*>)(.*?)</\\2>`, "s").exec(h);
+  return m ? { tag: m[1], inner: m[3] } : null;
+};
+
+test("the certway card: each fact on its own [data-fact] element, the as-of line, the hidden failure note", () => {
+  const h = plain("index.html");
+  const tag = factElement(h, "tag");
+  assert.equal(tag.inner, "v1.0.1");
+  assert.ok(hasAttr(tag.tag, "href", "https://github.com/MrAryanCode/certway/releases/tag/v1.0.1"), "the tag links to the release");
+  assert.equal(factElement(h, "license").inner, "MIT");
+  assert.equal(factElement(h, "stars").inner, "3");
+  assert.equal(factElement(h, "pushedAt").inner, "2026-11-07");
+  for (const name of ["tag", "license", "stars", "pushedAt"]) {
+    assert.equal((h.match(new RegExp(`data-fact="${name}"`, "g")) ?? []).length, 1, `exactly one ${name} fact`);
+  }
+  const asOf = [...h.matchAll(/<time\b[^>]*\sdata-as-of[^>]*>(.*?)<\/time>/g)];
+  assert.equal(asOf.length, 1, "exactly one time[data-as-of]");
+  assert.match(asOf[0][0], /datetime="\d{4}-\d\d-\d\dT[\d:.]+Z"/);
+  assert.match(asOf[0][1], /^\d{4}-\d\d-\d\d \d\d:\d\d UTC$/);
+  const sentence = stripTags(/<p[^>]*>([^<]*<time\b[^>]*\sdata-as-of[^>]*>.*?<\/time>[^<]*)<\/p>/s.exec(h)[1]);
+  assert.match(sentence, /^Facts from the GitHub API as of \d{4}-\d\d-\d\d \d\d:\d\d UTC, when this page was built\.$/, "the build wording of the as-of sentence");
+  const note = /<p\b[^>]*\sdata-live-fail[^>]*>(.*?)<\/p>/s.exec(h);
+  assert.ok(hasAttr(note[0], "hidden") && hasAttr(note[0], "role", "status"), "the note is hidden and a status message");
+  assert.equal(stripTags(note[1]), "Live facts could not be read. Showing the facts from when this page was built.");
+  assert.ok(h.indexOf("data-live-fail") < h.indexOf("data-as-of"), "the note is directly above the as-of line");
+  assert.deepEqual([...h.matchAll(/<dt class="tile-label">([^<]*)<\/dt>/g)].map((m) => m[1]), ["Latest release", "License", "Stars", "Last push"]);
+  assert.ok(!h.includes("data-read-at"), "the old read-time stamp is gone");
+});
+
+test("home: main holds the four sections in order, each labelled by its own heading, with one h1 and the signed outline", () => {
+  const main = homeMain();
+  assert.equal(main.replace(/<section\b.*?<\/section>/gs, "").trim(), "", "main holds nothing but its four sections");
+  const sections = openTags(main, "section");
+  assert.equal(sections.length, 4);
+  assert.deepEqual(sections.map((t) => /\sid="([^"]*)"/.exec(t)?.[1] ?? null), [null, null, "skills", "working"]);
+  assert.deepEqual(sections.map((t) => /\sdata-field-kind="([^"]*)"/.exec(t)?.[1]), ["0", "1", "2", "3"], "field kinds hero, work, skills, working");
+  for (const t of sections) {
+    const label = /\saria-labelledby="([^"]*)"/.exec(t)?.[1];
+    assert.ok(label && main.includes(` id="${label}"`), `${t} is labelled by an element that exists`);
+  }
+  const outline = [...main.matchAll(/<h([1-3])\b[^>]*>(.*?)<\/h\1>/gs)].map((m) => `h${m[1]} ${stripTags(m[2])}`);
+  assert.deepEqual(outline, ["h1 Aryan Miri", "h2 Work", "h3 certway", "h3 This site", "h2 Skills", "h3 Shipped in public", "h3 Also worked with", "h2 Working with me"]);
+  assert.equal((plain("index.html").match(/<h1\b/g) ?? []).length, 1, "one h1 on the page");
+  const work = openTags(main, "h2").find((t) => hasAttr(t, "id", "work"));
+  assert.ok(work && hasAttr(work, "tabindex", "-1"), "the Work h2 is the target of See the work");
+  const articles = openTags(main, "article");
+  assert.deepEqual(articles.map((t) => /\sid="([^"]*)"/.exec(t)?.[1]), ["certway", "this-site"], "both cards are articles, certway first");
+  const at = (id) => main.indexOf(` id="${id}"`);
+  assert.ok(at("certway") > 0 && at("certway") < at("this-site") && at("this-site") < at("skills") && at("skills") < at("working"), "certway, this site, skills, working, in that order");
+});
+
+test("home: the Telegram links (first screen and #working), the email link, See the work, and the cards' links", () => {
+  const main = homeMain();
+  const [hero, , , working] = [...main.matchAll(/<section\b.*?<\/section>/gs)].map((m) => m[0]);
+  const telegram = 'href="https://t.me/aryan_61_04"';
+  assert.equal(hero.split(telegram).length - 1, 1, "exactly one Telegram link on the first screen");
+  assert.ok(!hero.includes("mailto:"), "no mailto link on the first screen");
+  assert.match(hero, /<a\b[^>]*href="https:\/\/t\.me\/aryan_61_04"[^>]*>Message me on Telegram<\/a>/);
+  assert.match(hero, /<a\b[^>]*href="#work"[^>]*>See the work<\/a>/);
+  assert.ok(working.includes(telegram) && working.includes('href="mailto:mraryanmiri@gmail.com"'), "#working links to Telegram and to email");
+  assert.ok(working.includes(">mraryanmiri@gmail.com</a>"));
+  const site = /<article\b[^>]*id="this-site".*?<\/article>/s.exec(main)[0];
+  assert.match(site, /<a\b[^>]*href="\/report\/"[^>]*>How this site is built<\/a>/);
+  assert.match(site, /<a\b[^>]*href="https:\/\/github\.com\/MrAryanCode\/MrAryanCode\.github\.io"[^>]*>Source on GitHub<\/a>/);
+  assert.deepEqual([...site.matchAll(/<li>(?:<svg.*?<\/svg>)?([^<]*)<\/li>/g)].map((m) => m[1]), identity.COPY_AT_STEP_3_SITE_CHECKS.map((c) => c.text), "the card lists the six checks, in order");
+  const certway = /<article\b[^>]*id="certway".*?<\/article>/s.exec(main)[0];
+  assert.match(certway, /<a\b[^>]*href="\/projects\/certway\/"[^>]*>Read the case study<\/a>/);
+  assert.match(certway, /<a\b[^>]*href="https:\/\/github\.com\/MrAryanCode\/certway"[^>]*>Source on GitHub<\/a>/);
+});
+
+test("home: the skills panels show the shipped items, each skill joined by commas, and the also-worked-with line", () => {
+  const section = /<section\b[^>]*id="skills".*?<\/section>/s.exec(plain("index.html"))[0];
+  const items = [...(/<ul>(.*?)<\/ul>/s.exec(section)[1]).matchAll(/<li>(.*?)<\/li>/gs)].map((m) => stripTags(m[1]));
+  assert.deepEqual(items, [
+    "certway: Rust",
+    "This site: TypeScript, SolidJS, Vite, Node.js, Playwright, HTML and CSS, GitHub Actions",
+    "GitHub profile: Python, GitHub Actions",
+  ]);
+  assert.ok(section.includes("<p>Go · React, Svelte · .NET · Flutter</p>"));
+});
+
+// design.md DS-04 and DS-05 (D-026, D-027): a check or a skill that the page names must still exist in the repository.
+test("every COPY_AT_STEP_3_SITE_CHECKS marker occurs in its file, and so does every marker of the This site skills", () => {
+  const site = skills.COPY_AT_STEP_3_SKILLS_SHIPPED.find((item) => item.label === "This site");
+  assert.ok(site, "the shipped list has a This site item");
+  assert.equal(identity.COPY_AT_STEP_3_SITE_CHECKS.length, 6);
+  assert.ok(site.skills.length > 0);
+  for (const item of identity.COPY_AT_STEP_3_SITE_CHECKS) {
+    assert.ok(readFileSync(join(root, item.file), "utf8").includes(item.marker), `check "${item.text}": marker ${JSON.stringify(item.marker)} is absent from ${item.file}`);
+  }
+  for (const skill of site.skills) {
+    assert.ok(readFileSync(join(root, skill.file), "utf8").includes(skill.marker), `skill "${skill.text}": marker ${JSON.stringify(skill.marker)} is absent from ${skill.file}`);
+  }
+});
+
+test("D-051 hooks on home: field kinds, tilt and parallax, magnet, scan, tiles, ticks, and plain fact values", () => {
+  const main = homeMain();
+  const articles = openTags(main, "article");
+  assert.equal(articles.length, 2);
+  for (const t of articles) assert.deepEqual(dataFx(t), ["tilt", "parallax"], `${t} tilts and moves with the scroll`);
+  const panels = openTags(main, "div").filter((t) => /\sclass="panel"/.test(t));
+  assert.equal(panels.length, 2, "two skills panels");
+  for (const t of panels) assert.deepEqual(dataFx(t), ["tilt"], "a skills panel tilts and has no parallax");
+  const fx = (token) => [...main.matchAll(/<\w+\b[^>]*\sdata-fx="[^"]*"[^>]*>/g)].map((m) => m[0]).filter((t) => dataFx(t).includes(token));
+  assert.equal(fx("tilt").length, 4);
+  assert.equal(fx("parallax").length, 2);
+  const magnets = fx("magnet");
+  assert.equal(magnets.length, 2, "the two primary pill buttons");
+  for (const t of magnets) assert.ok(/^<a\b/.test(t) && /\sclass="btn btn-primary"/.test(t) && hasAttr(t, "href", "https://t.me/aryan_61_04"), `${t} is a primary Telegram link`);
+  assert.equal([...main.matchAll(/<div class="heading-row" data-fx="scan"><span class="index" aria-hidden="true"><\/span><h2\b/g)].length, 3, "a scan row for Work, Skills and Working with me");
+  assert.equal(fx("scan").length, 3, "scan sits on nothing else");
+  const tiles = /<dl\b[^>]*\sdata-fx="tiles"[^>]*>(.*?)<\/dl>/s.exec(main);
+  assert.ok(tiles && fx("tiles").length === 1, "one facts box carries tiles");
+  for (const name of ["tag", "license", "stars", "pushedAt"]) assert.ok(tiles[1].includes(`data-fact="${name}"`), `${name} is inside the facts box`);
+  const ticks = /<ul\b[^>]*\sdata-fx="ticks"[^>]*>(.*?)<\/ul>/s.exec(main);
+  assert.ok(ticks && fx("ticks").length === 1, "one checks list carries ticks");
+  const rows = ticks[1].match(/<li>.*?<\/li>/gs) ?? [];
+  assert.equal(rows.length, 6);
+  for (const row of rows) assert.match(row, /^<li><svg\b[^>]*aria-hidden="true"/, "each check starts with its tick");
+  // The fact values are plain text: no roll markup and no child element (the roll overlay is added later, D-053).
+  for (const name of ["tag", "license", "stars", "pushedAt"]) {
+    assert.ok(!factElement(plain("index.html"), name).inner.includes("<"), `data-fact ${name} holds plain text only`);
   }
 });
 
@@ -312,7 +436,8 @@ test("a build with a commit: the footer stamp reads Built <date> from <sha7> and
   }
 });
 
-// Last on purpose: it stops the shared helpers and rebuilds dist/ from a fixture whose description closes the script.
+// This test and the one after it come last on purpose: each stops the shared helpers and rebuilds dist/ from a changed fixture.
+// This one uses a description that closes the script.
 test("#site-data never holds a raw '<' and still parses back to the same facts (D-059)", async () => {
   const hostile = "x</script><b>y & z";
   const dir = mkdtempSync(join(tmpdir(), "site-fixtures-"));
@@ -330,6 +455,26 @@ test("#site-data never holds a raw '<' and still parses back to the same facts (
       assert.ok(!block[1].includes("<"), `${f} #site-data has a raw '<'`);
       assert.equal(JSON.parse(block[1]).facts.repo.description, hostile, `${f} description`);
     }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// design.md DS-03, Empty: a repository without a license has no License row. A fixture whose license is null must build,
+// and the other facts stay. It rebuilds dist/ like the test above, so it comes last too.
+test("a fixture whose license is null builds and the home page has no License row", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "site-fixtures-"));
+  try {
+    cpSync(join(root, "test", "fixtures"), dir, { recursive: true });
+    const file = join(dir, "repo-certway.json");
+    writeFileSync(file, JSON.stringify({ ...JSON.parse(readFileSync(file, "utf8")), license: null }));
+    await stopAll();
+    await buildAndServe({ fixturesDir: dir });
+    const h = plain("index.html");
+    assert.ok(!h.includes('data-fact="license"'), "no license fact element");
+    assert.ok(!h.includes(">License<"), "no License label");
+    assert.deepEqual([...h.matchAll(/<dt class="tile-label">([^<]*)<\/dt>/g)].map((m) => m[1]), ["Latest release", "Stars", "Last push"]);
+    for (const name of ["tag", "stars", "pushedAt"]) assert.ok(factElement(h, name), `${name} is still shown`);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
