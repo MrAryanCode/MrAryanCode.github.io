@@ -27,6 +27,14 @@
   // Home to these two pages morphs the card that leads there into the page's header band (D-041).
   // Every other navigation keeps the browser's 0.25 s crossfade and carries no name.
   var TARGET = /^\/(?:projects\/certway|report)\/$/;
+  // The footer also links to /report/, and D-041 gives it the crossfade: a click on a link outside the cards is
+  // remembered here, and pageswap hands it to the new page through this key.
+  var CROSSFADE_KEY = 'vt-crossfade';
+  var offCard = false;
+  addEventListener('click', function (e) {
+    var a = e.target && e.target.closest ? e.target.closest('a[href]') : null;
+    offCard = !!a && !a.closest('.panel-card');
+  }, true);
 
   // Gate for same-document transitions: window.vtSettled() resolves when no
   // cross-document transition is pending.
@@ -47,6 +55,13 @@
     } catch (e) { return ''; }
   }
   function isPair(from, to) { return from === '/' && TARGET.test(to); }
+  function takeCrossfade() {
+    try {
+      var v = sessionStorage.getItem(CROSSFADE_KEY) === '1';
+      sessionStorage.removeItem(CROSSFADE_KEY);
+      return v;
+    } catch (e) { return false; }
+  }
   function activationFrom() {
     var a = window.navigation && navigation.activation;
     if (a && a.from) return pathOf(a.from.url);
@@ -81,11 +96,17 @@
     var from = pathOf(location.href);
     var to = e.activation && e.activation.entry ? pathOf(e.activation.entry.url) : '';
     clearNames();
-    if (isPair(from, to)) name(cardFor(to), vt);
+    if (!isPair(from, to)) return;
+    if (offCard) {
+      try { sessionStorage.setItem(CROSSFADE_KEY, '1'); } catch (e) {}
+      return;
+    }
+    name(cardFor(to), vt);
   });
 
   addEventListener('pagereveal', function (e) {
     if (settled) arm();
+    var crossfade = takeCrossfade();
     var vt = e.viewTransition;
     if (!vt) { open(); return; }
     vt.ready.catch(function () {});
@@ -95,11 +116,12 @@
       return;
     }
     clearNames();
-    if (isPair(activationFrom(), pathOf(location.href))) name(document.querySelector('.band'), vt, open);
+    if (!crossfade && isPair(activationFrom(), pathOf(location.href))) name(document.querySelector('.band'), vt, open);
     else vt.finished.then(open, open);
   });
   // A restore from the back-forward cache fires pageshow before pagereveal.
   addEventListener('pageshow', function (e) {
+    if (e.persisted) offCard = false;
     if (e.persisted && settled && 'onpagereveal' in window) arm();
   });
 })();

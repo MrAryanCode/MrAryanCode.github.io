@@ -129,10 +129,21 @@ function summary(log) {
 
 const unique = (names) => new Set(names.map((n) => n.split("@")[0])).size === names.length;
 
+/** Goes from home to the certway page by its card and waits until that page is quiet, so that Back has a page to return to. */
+async function visitCertway(page) {
+  await page.click(MORPHS[0].link);
+  await page.waitForURL((u) => u.pathname === MORPHS[0].url);
+  await page.waitForFunction(() => window.__hydrated === true);
+  await loaderIdle(page);
+  await page.waitForTimeout(1000); // past the 0.76 s morph
+}
+
 /** The navigations that are not the morph: header links, a script navigation, the 404 link list. */
 const OTHERS = [
   { label: "certway to home (header link)", start: "/projects/certway/", go: (p) => p.click('header a[href="/"]'), url: "/" },
   { label: "report to home (header link)", start: "/report/", go: (p) => p.click('header a[href="/"]'), url: "/" },
+  { label: "certway to home (Back)", start: "/", prepare: visitCertway, go: (p) => p.goBack(), url: "/" },
+  { label: "home to the report (footer link)", start: "/", go: (p) => p.click('footer a[href="/report/"]'), url: "/report/" },
   { label: "certway to the report (script)", start: "/projects/certway/", go: (p) => p.evaluate(() => { location.href = "/report/"; }), url: "/report/" },
   { label: "home to a missing page (script)", start: "/", go: (p) => p.evaluate(() => { location.href = "/nope/x"; }), url: "/nope/x" },
   { label: "404 to home (link list)", start: "/nope/x", go: (p) => p.click('main a[href="/"]'), url: "/" },
@@ -166,6 +177,10 @@ describe("cross-document transition in chromium", () => {
   for (const o of OTHERS) {
     test(`(b) ${o.label}: crossfade, no morph name`, async () => {
       const { ctx, page, problems } = await open(browser, { start: o.start });
+      if (o.prepare) {
+        await o.prepare(page);
+        await page.evaluate(() => sessionStorage.removeItem("__vt"));
+      }
       await o.go(page);
       const s = summary(await settle(page, o.url));
       assert.deepEqual(s.swap, { ev: "pageswap", vt: true, names: [] });
@@ -285,6 +300,7 @@ for (const engine of ["firefox", "webkit"]) {
         await page.goto(BASE + n.start, { waitUntil: "load" });
         await page.waitForFunction(() => window.__hydrated === true);
         await loaderIdle(page);
+        if (n.prepare) await n.prepare(page);
         await n.go(page);
         await page.waitForURL((u) => u.pathname === n.url);
         await page.waitForFunction(() => window.__hydrated === true);
