@@ -5,10 +5,16 @@ import { SITE, type Route } from "./routes";
 const esc = (s: string): string =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
-/** `preloads` are the font preload tags, already rendered; they go after the icons. */
+/**
+ * `preloads` are the font preload tags, already rendered; they go after the icons.
+ * The 404 route has no card (D-033): no canonical, `og:url`, `og:image`, `og:image:type`, `og:image:alt` or
+ * `twitter:image`. It keeps `og:image:width`, `og:image:height` and `twitter:card` because the head checker
+ * of t3-web-page-conventions requires them on every page.
+ */
 export function renderHead(route: Route, preloads: string[] = []): string {
   const url = SITE + route.path;
   const image = `${SITE}/og/${route.ogSlug}.png`;
+  const card = route.ogCard !== undefined;
   const lines = [
     `<meta charset="utf-8">`,
     `<meta name="viewport" content="width=device-width, initial-scale=1">`,
@@ -16,7 +22,7 @@ export function renderHead(route: Route, preloads: string[] = []): string {
     `<meta name="description" content="${esc(route.description)}">`,
     ...(route.canonical ? [`<link rel="canonical" href="${url}">`] : []),
     `<meta name="color-scheme" content="light dark">`,
-    `<link rel="icon" href="/favicon.ico" sizes="48x48">`,
+    `<link rel="icon" href="/favicon.ico" sizes="32x32 16x16">`,
     `<link rel="icon" href="/icon.svg" type="image/svg+xml">`,
     `<link rel="apple-touch-icon" href="/apple-touch-icon.png">`,
     ...preloads,
@@ -25,13 +31,12 @@ export function renderHead(route: Route, preloads: string[] = []): string {
     `<meta property="og:title" content="${esc(route.title)}">`,
     `<meta property="og:description" content="${esc(route.description)}">`,
     ...(route.canonical ? [`<meta property="og:url" content="${url}">`] : []),
-    `<meta property="og:image" content="${image}">`,
-    `<meta property="og:image:type" content="image/png">`,
+    ...(card ? [`<meta property="og:image" content="${image}">`, `<meta property="og:image:type" content="image/png">`] : []),
     `<meta property="og:image:width" content="1200">`,
     `<meta property="og:image:height" content="630">`,
-    `<meta property="og:image:alt" content="${esc(route.ogAlt)}">`,
+    ...(card ? [`<meta property="og:image:alt" content="${esc(route.ogAlt)}">`] : []),
     `<meta name="twitter:card" content="summary_large_image">`,
-    `<meta name="twitter:image" content="${image}">`,
+    ...(card ? [`<meta name="twitter:image" content="${image}">`] : []),
     `<style>:root { color-scheme: light dark; }</style>`,
   ];
   return lines.join("\n");
