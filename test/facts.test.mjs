@@ -93,3 +93,49 @@ describe("fetchFacts (build-time GETs)", () => {
     await assert.rejects(fetchFacts(), /answered 500/);
   });
 });
+
+// scripts/github.mjs reads SITE_GITHUB_API_URL and SITE_GITHUB_TOKEN once, at import time, so each case imports
+// a fresh instance (a query string makes it a new module) with the environment set first.
+describe("the token goes to api.github.com only (D-059)", () => {
+  const TOKEN = "test-token-value";
+  const realFetch = globalThis.fetch;
+  const saved = { api: process.env.SITE_GITHUB_API_URL, token: process.env.SITE_GITHUB_TOKEN };
+  let calls = [];
+  const restoreEnv = (key, value) => (value === undefined ? delete process.env[key] : (process.env[key] = value));
+  const instance = (n, api) => {
+    if (api === undefined) delete process.env.SITE_GITHUB_API_URL;
+    else process.env.SITE_GITHUB_API_URL = api;
+    process.env.SITE_GITHUB_TOKEN = TOKEN;
+    return import(`../scripts/github.mjs?token-case-${n}`);
+  };
+  before(() => {
+    // A stand-in for the network: records the headers of every request and answers with the fixtures.
+    globalThis.fetch = async (url, init) => {
+      calls.push({ url: String(url), auth: init.headers.Authorization ?? null });
+      const file = String(url).endsWith("/releases/latest") ? "release-latest-certway.json" : "repo-certway.json";
+      return new Response(readFileSync(new URL(`./fixtures/${file}`, import.meta.url)), { status: 200 });
+    };
+  });
+  after(() => {
+    globalThis.fetch = realFetch;
+    restoreEnv("SITE_GITHUB_API_URL", saved.api);
+    restoreEnv("SITE_GITHUB_TOKEN", saved.token);
+  });
+
+  test("for the exact origin https://api.github.com both requests carry the Authorization header", async () => {
+    calls = [];
+    const { fetchFacts } = await instance(1, undefined);
+    await fetchFacts();
+    assert.deepEqual(calls.map((c) => c.url), [`https://api.github.com/repos/${NAME}`, `https://api.github.com/repos/${NAME}/releases/latest`]);
+    assert.ok(calls.every((c) => c.auth === `Bearer ${TOKEN}`));
+  });
+
+  for (const [n, api] of [[2, "http://127.0.0.1:4611"], [3, "https://api.github.com.evil.test"], [4, "http://api.github.com"]]) {
+    test(`for ${api} the build throws and no request is made`, async () => {
+      calls = [];
+      const { fetchFacts } = await instance(n, api);
+      await assert.rejects(fetchFacts(), /refusing to send the token/);
+      assert.deepEqual(calls, []);
+    });
+  }
+});

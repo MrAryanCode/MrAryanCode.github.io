@@ -7,6 +7,7 @@ const API = process.env.SITE_GITHUB_API_URL || "https://api.github.com";
 const REPO = process.env.SITE_GITHUB_REPO || "MrAryanCode/certway";
 const TOKEN = process.env.SITE_GITHUB_TOKEN; // optional; an empty string counts as absent
 const TIMEOUT_MS = 15_000;
+const TOKEN_ORIGIN = "https://api.github.com";
 
 async function get(path) {
   const headers = {
@@ -14,7 +15,12 @@ async function get(path) {
     "X-GitHub-Api-Version": "2026-03-10",
     "User-Agent": "mraryancode.github.io-build",
   };
-  if (TOKEN) headers.Authorization = `Bearer ${TOKEN}`;
+  if (TOKEN) {
+    // The token goes to api.github.com and nowhere else. Checked before fetch, so it never leaves the process.
+    const origin = new URL(API + path).origin;
+    if (origin !== TOKEN_ORIGIN) throw new Error(`GitHub API ${path}: refusing to send the token to origin ${origin}`);
+    headers.Authorization = `Bearer ${TOKEN}`;
+  }
   let res;
   try {
     // redirect: "error" turns a renamed or transferred repository (301) into a failure.
