@@ -65,3 +65,58 @@ for (const c of gpuCases) {
     await ctx.close();
   });
 }
+
+// Underline draw (D-051, P-12): the resting underline draws to full width in 0.42 s on hover or focus and retracts in 0.42 s;
+// it is instant under reduced motion and under html[data-motion="paused"]; and the step-down level does not change it.
+async function underlineRuns(page, how) {
+  const link = page.locator('a[href="/report/"]').first();
+  // Chromium does not start a transition on the first link hover of a page that runs script (pages without script do),
+  // so hover once and wait for the line to settle before measuring.
+  await link.hover();
+  await page.mouse.move(0, 0);
+  await page.waitForTimeout(600);
+  if (how === "focus") {
+    for (let i = 0; i < 40 && !(await link.evaluate((el) => el.matches(":focus-visible"))); i++) await page.keyboard.press("Tab");
+  } else {
+    await link.hover();
+  }
+  const draw = await link.evaluate((el) => ({
+    ms: el.getAnimations().filter((a) => a.transitionProperty === "background-size").map((a) => a.effect.getTiming().duration),
+    from: getComputedStyle(el).backgroundPositionX.split(",")[0].trim(),
+  }));
+  let retract = null;
+  if (how === "hover") {
+    // Let the draw finish: leaving mid-draw reverses the transition with a shortened duration.
+    await page.waitForTimeout(600);
+    await page.mouse.move(0, 0);
+    retract = await link.evaluate((el) => ({
+      ms: el.getAnimations().filter((a) => a.transitionProperty === "background-size").map((a) => a.effect.getTiming().duration),
+      from: getComputedStyle(el).backgroundPositionX.split(",")[0].trim(),
+    }));
+  }
+  return { draw, retract };
+}
+
+for (const c of [
+  { name: "present", ctx: {}, init: [], ms: [420] },
+  { name: "reduced motion", ctx: { reducedMotion: "reduce" }, init: [], ms: [] },
+  { name: "paused", ctx: {}, init: [() => document.addEventListener("DOMContentLoaded", () => { document.documentElement.dataset.motion = "paused"; })], ms: [] },
+  { name: "motion-level-pin 7", ctx: {}, init: [() => sessionStorage.setItem("motion-level-pin", "7")], ms: [420] },
+]) {
+  test(`underline draw: ${c.name}`, async () => {
+    const ctx = await browser.newContext(c.ctx);
+    const page = await ctx.newPage();
+    for (const s of c.init) await page.addInitScript(s);
+    await page.goto(BASE + "/", { waitUntil: "load" });
+    for (const how of ["hover", "focus"]) {
+      const { draw, retract } = await underlineRuns(page, how);
+      assert.deepEqual(draw.ms, c.ms, `${how}: transition durations in ms`);
+      assert.match(draw.from, /^0(px|%)$/, `${how}: the drawn line is anchored left while drawing`);
+      if (retract) {
+        assert.deepEqual(retract.ms, c.ms, "leave: transition durations in ms");
+        assert.equal(retract.from, "100%", "leave: the drawn line is anchored right while it retracts");
+      }
+    }
+    await ctx.close();
+  });
+}
