@@ -111,9 +111,12 @@ async function open(browser, { reduce = false, paused = false, shift = false, st
 
 const readLog = (page) => page.evaluate(() => JSON.parse(sessionStorage.getItem("__vt") || "[]"));
 
-/** Waits until the arriving page is hydrated and its transition (if it has one) has finished, then returns the log. */
-async function settle(page, url) {
-  await page.waitForURL((u) => u.pathname === url);
+/**
+ * Waits until the arriving page is hydrated and its transition (if it has one) has finished, then returns the log.
+ * A page restored from the back-forward cache fires no load event, so that case passes "commit".
+ */
+async function settle(page, url, waitUntil = "load") {
+  await page.waitForURL((u) => u.pathname === url, { waitUntil });
   await page.waitForFunction(() => window.__hydrated === true);
   await page.waitForFunction(() => {
     const log = JSON.parse(sessionStorage.getItem("__vt") || "[]");
@@ -328,6 +331,16 @@ describe("cross-document transition in chromium", () => {
     test(`(d) no two elements carry one name at a snapshot, through a forward, back and forward sequence [repeat ${n}/${REPEATS}]`, oneNamePerSnapshot);
   }
 
+  // G-68: a ctrl-click on the card opens a tab and leaves this page where it is; a script navigation that follows it is not a card click.
+  test("(b) home to certway (script after a ctrl-click on the card): crossfade, no morph name", () => crossfade({
+    start: "/",
+    go: async (p) => {
+      await p.click(MORPHS[0].link, { modifiers: ["Control"] });
+      await p.evaluate(() => { location.href = "/projects/certway/"; });
+    },
+    url: "/projects/certway/",
+  }));
+
   // Without JavaScript there is no opt-in and no names: a click on a card and on a header link is an instant cut.
   test("(h) without JavaScript: navigations complete with no console error and no static opt-in exists", async () => {
     const ctx = await browser.newContext({ javaScriptEnabled: false });
@@ -347,7 +360,10 @@ describe("cross-document transition in chromium", () => {
     // All four pages: no <style> in the markup holds the opt-in and no linked stylesheet does either; only the script inserts it.
     for (const file of ["index.html", "projects/certway/index.html", "report/index.html", "404.html"]) {
       const page = html(file);
-      const sheets = [...page.matchAll(/<link[^>]*rel="stylesheet"[^>]*href="([^"]+)"/g)].map((m) => m[1]);
+      const sheets = [...page.matchAll(/<link\b[^>]*>/g)].map((m) => m[0])
+        .filter((tag) => /\brel="?stylesheet"?/.test(tag))
+        .map((tag) => tag.match(/\bhref="([^"]+)"/)?.[1])
+        .filter(Boolean);
       assert.ok(sheets.length > 0, `${file} links its stylesheet`);
       assert.ok(!/<style[^>]*>[^<]*@view-transition/.test(page), `${file}: no <style> of the markup holds the opt-in`);
       for (const href of sheets) assert.ok(!/@view-transition/.test(readFileSync(dist(href.replace(/^\//, "")), "utf8")), `${file}: ${href} holds no opt-in`);
@@ -388,6 +404,43 @@ describe("cross-document transition in chromium", () => {
       await ctx.close();
     });
   }
+});
+
+// G-68 with the back-forward cache on: the headless shell the other cases run in has no cache, so this one launches full Chromium
+// (CHROMIUM_FULL_PATH on a machine whose installed revision is not the pinned one; CI leaves it unset) with the cache enabled.
+// Home is left by a card click and restored by Back from the cache, as in a real browser; the card click of its first lifetime
+// must not make the Forward navigation that follows a morph (the head script's pageshow reset).
+describe("cross-document transition in chromium with the back-forward cache", () => {
+  let browser;
+  before(async () => {
+    browser = await chromium.launch({
+      headless: true,
+      channel: "chromium",
+      executablePath: process.env.CHROMIUM_FULL_PATH || undefined,
+      ignoreDefaultArgs: ["--disable-back-forward-cache"],
+    });
+  });
+  after(async () => { await browser?.close(); });
+
+  test("(b) home to certway (Forward, home restored from the cache): crossfade, no morph name", async () => {
+    const { ctx, page, problems } = await open(browser);
+    await page.evaluate(() => { window.__marker = "home"; }); // survives only if home is restored from the cache
+    await visitCertway(page);
+    await page.goBack({ waitUntil: "commit" }); // a restore from the cache fires no load event
+    await page.waitForURL((u) => u.pathname === "/", { waitUntil: "commit" });
+    await page.waitForTimeout(1000); // past the Back crossfade, so its `finished` is not read as the next navigation's
+    assert.equal(await page.evaluate(() => window.__marker), "home", "home was restored from the back-forward cache");
+    await page.evaluate(() => sessionStorage.removeItem("__vt"));
+    await page.goForward({ waitUntil: "commit" });
+    const s = summary(await settle(page, MORPHS[0].url, "commit"));
+    assert.deepEqual(s.swap, { ev: "pageswap", vt: true, names: [] });
+    assert.equal(s.reveal.vt, true, "the new page received a transition");
+    assert.deepEqual(s.ready.names, []);
+    assert.ok(s.pseudos.includes("::view-transition-old(root)"), `the root crossfade runs: ${s.pseudos.join(" ")}`);
+    assert.ok(!s.pseudos.some((p) => PAIR_RE.test(p)), `no morph group: ${s.pseudos.join(" ")}`);
+    assert.deepEqual(problems, []);
+    await ctx.close();
+  });
 });
 
 // (g) Firefox and WebKit: the same navigations complete, with no console error.

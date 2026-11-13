@@ -19,12 +19,14 @@
   var TARGET = /^\/(?:projects\/certway|report)\/$/;
   // The morph runs only when the navigation follows a click on a card (G-68): the footer also links to /report/, and
   // Forward and a script-set location.href also reach a target, and D-041 gives all of them the crossfade. The last
-  // click's link is remembered here, and pageswap hands a crossfade decision to the new page through this key.
+  // click is remembered here (true only for an unmodified primary click on a card link that leads to a target, so a
+  // ctrl-click that opens a tab leaves it false), and pageswap hands a crossfade decision to the new page through this key.
   var CROSSFADE_KEY = 'vt-crossfade';
   var cardClicked = false;
   addEventListener('click', function (e) {
     var a = e.target && e.target.closest ? e.target.closest('a[href]') : null;
-    cardClicked = !!a && !!a.closest('.panel-card');
+    var plain = e.button === 0 && !e.ctrlKey && !e.metaKey && !e.shiftKey && !e.altKey;
+    cardClicked = plain && !!a && !!a.closest('.panel-card') && TARGET.test(pathOf(a.href));
   }, true);
 
   // Gate for same-document transitions: window.vtSettled() resolves when no
