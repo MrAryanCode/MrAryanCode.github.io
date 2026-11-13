@@ -1,0 +1,35 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":pinAllExceptPeerDependencies",
+    "helpers:pinGitHubActionDigests"
+  ],
+  "automerge": true,
+  "automergeType": "pr",
+  "platformAutomerge": true,
+  "automergeStrategy": "squash",
+  "lockFileMaintenance": {
+    "enabled": true,
+    "automerge": true
+  },
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "npm pin written literally in a workflow run: line, preceded by a renovate comment",
+      "managerFilePatterns": ["/^\\.github/workflows/[^/]+\\.ya?ml$/"],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>[a-z-]+) depName=(?<depName>[^\\s]+)\\n\\s*(?:npm install -g npm@|test \"\\$\\(npm --version\\)\" = \")(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)"
+      ]
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "Node: follow Current releases, never a pre-release",
+      "matchDepNames": ["node"],
+      "ignoreUnstable": false,
+      "respectLatest": false,
+      "allowedVersions": "/^v?[0-9]+\\.[0-9]+\\.[0-9]+$/"
+    }
+  ]
+}
