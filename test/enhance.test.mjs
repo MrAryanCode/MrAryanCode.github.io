@@ -110,8 +110,11 @@ test("Pause toggles the label and aria-pressed, aborts the signal once and write
 
   const writesBefore = await page.evaluate(() => window.__tierWrites);
   await button.click();
-  assert.deepEqual(await state(page), { label: "Pause motion", pressed: "false", motion: null, tier: "0", stored: null });
+  const { tier: _playTier, ...played } = await state(page);
+  assert.deepEqual(played, { label: "Pause motion", pressed: "false", motion: null, stored: null });
   await page.waitForFunction((n) => window.__tierWrites > n, writesBefore);
+  await page.waitForFunction(() => document.documentElement.dataset.tier === "1");
+  assert.equal((await state(page)).tier, "1", "Play starts tier 1");
   assert.equal(await page.evaluate(() => window.__aborts), abortsBefore + 1, "Play aborts nothing");
   await ctx.close();
 });
@@ -125,7 +128,10 @@ test("motion-paused = 1 starts no tier and creates the button as Play motion; Pl
   assert.deepEqual(logs, []);
   // Play on such a page starts the loader from tier 1.
   await page.locator("button.pause").click();
-  assert.deepEqual(await state(page), { label: "Pause motion", pressed: "false", motion: null, tier: "0", stored: null });
+  const { tier: _playTier, ...played } = await state(page);
+  assert.deepEqual(played, { label: "Pause motion", pressed: "false", motion: null, stored: null });
+  await page.waitForFunction(() => document.documentElement.dataset.tier === "1");
+  assert.equal((await state(page)).tier, "1", "Play starts tier 1");
   await page.waitForTimeout(500);
   assert.equal(tier1Requests(requests).length, 1, "Play requested tier 1");
   await ctx.close();
@@ -142,7 +148,10 @@ test("blocked sessionStorage: the page reads, the button works for the page view
   await button.click();
   assert.deepEqual(await state(page), { label: "Play motion", pressed: "true", motion: "paused", tier: "0", stored: "blocked" });
   await button.click();
-  assert.deepEqual(await state(page), { label: "Pause motion", pressed: "false", motion: null, tier: "0", stored: "blocked" });
+  const { tier: _playTier, ...played } = await state(page);
+  assert.deepEqual(played, { label: "Pause motion", pressed: "false", motion: null, stored: "blocked" });
+  await page.waitForFunction(() => document.documentElement.dataset.tier === "1");
+  assert.equal((await state(page)).tier, "1", "Play starts tier 1");
   assert.deepEqual(logs, [], "no console message and no page error");
   await ctx.close();
 });
