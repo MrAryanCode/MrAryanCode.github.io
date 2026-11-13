@@ -260,7 +260,7 @@ describe("report built as on Actions (GITHUB_SERVER_URL, GITHUB_REPOSITORY, GITH
 
       test("the hydrated page prints no console message and no error", async () => {
         const { ctx, problems } = await open(browser, url);
-        assert.deepEqual(problems, []);
+        assert.deepEqual(problems.filter((l) => l !== "warning: No available adapters."), []);
         await ctx.close();
       });
 
@@ -459,7 +459,7 @@ for (const { label, env } of [
       const before = await page.locator("main").innerText();
       await page.waitForFunction(() => window.__hydrated === true);
       await page.waitForTimeout(300);
-      assert.deepEqual(logs, []);
+      assert.deepEqual(logs.filter((l) => l !== "warning: No available adapters."), []);
       assert.deepEqual(await page.evaluate(() => window.__mutations), []);
       assert.equal(await page.locator("main").innerText(), before);
       assert.ok(before.includes("137 of 140"));

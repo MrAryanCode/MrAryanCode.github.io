@@ -1,5 +1,5 @@
 // The enhancement loader and the pause control (T-019; P-06.5, D-023, D-051), in headless Chromium on the production build.
-// The tier modules are stubs that decline, so these checks see the loader, the button and the page, not the tiers.
+// The tier modules run in the page: tier 2 starts the input worker, so these checks see the loader, the button and the tiers up to 2.
 import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 import { chromium } from "playwright";
