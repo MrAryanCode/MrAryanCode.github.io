@@ -9,7 +9,7 @@ import * as identity from "../src/content/identity.ts";
 import * as skills from "../src/content/skills.ts";
 import * as working from "../src/content/working.ts";
 import { routes } from "../src/routes.ts";
-import { buildAndServe, dist, html, root, stopAll } from "./helpers.mjs";
+import { TEST_SHA, buildAndServe, dist, html, root, stopAll } from "./helpers.mjs";
 
 before(() => buildAndServe());
 after(stopAll);
@@ -34,11 +34,77 @@ for (const p of pages) {
   });
 }
 
+// The signed 404 copy (design.md DS-10, D-032), written out here on purpose like the route copy below.
+const COPY_AT_STEP_3_404_H1 = "404";
+const COPY_AT_STEP_3_404_LEAD = "This page does not exist. These are the pages on this site:";
+const COPY_AT_STEP_3_404_LINKS = [
+  { label: "Home page", href: "/" },
+  { label: "certway case study", href: "/projects/certway/" },
+  { label: "Engineering report", href: "/report/" },
+];
+const allFiles = ["index.html", "projects/certway/index.html", "report/index.html", "404.html"];
+// Solid writes data-hk keys and <!--$--> markers into the prerendered HTML; the checks below read the page without them.
+const plain = (file) => html(file).replace(/<!--.*?-->/gs, "").replace(/ data-hk="[^"]*"/g, "");
+
 test("404.html: content, no canonical", () => {
-  const h = html("404.html");
-  assert.match(h, /<h1[^>]*>Page not found<\/h1>/);
+  const h = plain("404.html");
+  assert.match(h, new RegExp(`<h1[^>]*>${COPY_AT_STEP_3_404_H1}</h1>`));
+  assert.ok(h.includes(COPY_AT_STEP_3_404_LEAD), "the lead line");
   assert.ok(h.includes("<title>404: Page not found | Aryan Miri</title>"));
   assert.ok(!h.includes('rel="canonical"'));
+});
+
+// The list is the site's pages in route-table order without the 404 route itself (D-032).
+const listHrefs = (h) => {
+  const list = /<ul class="page-list"[^>]*>(.*?)<\/ul>/s.exec(h)[1];
+  return [...list.matchAll(/<a\s[^>]*href="([^"]*)"/g)].map((m) => m[1]);
+};
+
+test("404.html: the link list is COPY_AT_STEP_3_404_LINKS and its hrefs equal the non-404 paths of src/routes.ts, in order", () => {
+  const h = plain("404.html");
+  const want = routes.filter((r) => r.id !== "notfound").map((r) => r.path);
+  assert.deepEqual(listHrefs(h), want);
+  assert.deepEqual(COPY_AT_STEP_3_404_LINKS.map((l) => l.href), want);
+  const labels = [...(/<ul class="page-list"[^>]*>(.*?)<\/ul>/s.exec(h)[1]).matchAll(/<span class="row-label">([^<]*)<\/span>/g)].map((m) => m[1]);
+  assert.deepEqual(labels, COPY_AT_STEP_3_404_LINKS.map((l) => l.label));
+});
+
+test("404.html: root-absolute hrefs in main and no aria-current anywhere", () => {
+  const h = plain("404.html");
+  const main = /<main[^>]*>(.*)<\/main>/s.exec(h)[1];
+  for (const [, href] of main.matchAll(/<a\s[^>]*href="([^"]*)"/g)) assert.ok(href.startsWith("/"), `href ${href} is not root-absolute`);
+  assert.ok(!h.includes("aria-current"), "no link points at the 404 page itself");
+});
+
+test("D-051 hooks: data-field-kind 0 on the 404 hero and 4 on every footer, data-fx arrow on each 404 row, progress on every page", () => {
+  const notFound = plain("404.html");
+  assert.equal((notFound.match(/<div class="not-found" data-field-kind="0">/g) ?? []).length, 1, "404 hero kind 0");
+  const rows = notFound.match(/<a class="row"[^>]*>.*?<\/a>/gs) ?? [];
+  assert.equal(rows.length, COPY_AT_STEP_3_404_LINKS.length);
+  for (const row of rows) assert.match(row, /<svg class="row-arrow" data-fx="arrow"/, "each row has an arrow");
+  assert.equal((notFound.match(/data-fx="arrow"/g) ?? []).length, rows.length, "only the rows carry an arrow");
+  for (const f of allFiles) {
+    const h = plain(f);
+    assert.match(/<footer[^>]*>/.exec(h)?.[0] ?? "", /data-field-kind="4"/, `${f} footer kind 4`);
+    assert.equal((h.match(/data-fx="progress"/g) ?? []).length, 1, `${f} progress bar element`);
+  }
+});
+
+test("the shared chrome: skip link first, identity link to /, Message me, the footer contact group and no Built line without a build", () => {
+  for (const f of allFiles) {
+    const h = plain(f);
+    const body = /<body[^>]*>(.*)<\/body>/s.exec(h)[1];
+    assert.match(body, /^\s*<div id="root"[^>]*><a class="skip" href="#main">Skip to content<\/a>/, `${f} skip link first`);
+    const header = /<header[^>]*>(.*?)<\/header>/s.exec(h)[1];
+    assert.match(header, /<a href="\/"[^>]*>.*Aryan Miri.*MrAryanCode.*<\/a>/s, `${f} identity link`);
+    assert.match(header, /<a href="https:\/\/t\.me\/aryan_61_04"[^>]*>Message me<\/a>/, `${f} Message me`);
+    const footer = /<footer[^>]*>(.*?)<\/footer>/s.exec(h)[1];
+    for (const href of ["mailto:mraryanmiri@gmail.com", "https://t.me/aryan_61_04", "https://github.com/MrAryanCode", "https://t.me/MrAryanCode", "https://github.com/MrAryanCode/MrAryanCode.github.io", "/report/"]) {
+      assert.ok(footer.includes(`href="${href}"`), `${f} footer lacks ${href}`);
+    }
+    assert.ok(footer.includes("© 2026 Aryan Miri. Text and images are not licensed for reuse."), `${f} rights line`);
+    assert.ok(!footer.includes("Built "), `${f} has a Built line with build null`);
+  }
 });
 
 test("facts are in the prerendered HTML and stamped with a read time", () => {
@@ -208,6 +274,26 @@ test("no content string is empty, and no CV value or link exists (D-013, P-02.4)
   for (const [k, v] of Object.entries(contact)) assert.ok(k === "cv" || !/cv/i.test(String(v)), `${k} looks like a CV value`);
   for (const f of ["index.html", "projects/certway/index.html", "report/index.html", "404.html"]) {
     for (const [, href] of html(f).matchAll(/<a\s[^>]*href="([^"]*)"/g)) assert.ok(!/cv/i.test(href), `${f} links to ${href}`);
+  }
+});
+
+// A build with a commit: the footer's last line is `Built <date> from <sha7>` with the 7 characters linking to the commit (D-023).
+// It rebuilds dist/ with GITHUB_SHA set, so it runs after every test above that needs the local build without a stamp.
+// The build time is the real start time of that build (scripts/build.mjs stamps it), so the test reads it from #site-data.
+test("a build with a commit: the footer stamp reads Built <date> from <sha7> and links to the commit, on every page", async () => {
+  await stopAll();
+  await buildAndServe({ githubSha: TEST_SHA });
+  for (const f of allFiles) {
+    const h = plain(f);
+    const data = JSON.parse(/<script type="application\/json" id="site-data">(.*?)<\/script>/s.exec(h)[1]);
+    assert.deepEqual(Object.keys(data.build).sort(), ["builtAt", "sha"], `${f} build keys`);
+    assert.equal(data.build.sha, TEST_SHA);
+    assert.match(data.build.builtAt, /^\d{4}-\d\d-\d\dT[\d:.]+Z$/);
+    const footer = /<footer[^>]*>(.*?)<\/footer>/s.exec(h)[1];
+    const stamp = `Built ${data.build.builtAt.slice(0, 10)} from <a href="https://github.com/MrAryanCode/MrAryanCode.github.io/commit/${TEST_SHA}">${TEST_SHA.slice(0, 7)}</a>`;
+    assert.ok(footer.includes(stamp), `${f} footer lacks the stamp: ${footer}`);
+    assert.ok(footer.trimEnd().endsWith(`${stamp}</p>`), `${f}: the stamp is the footer's last line`);
+    assert.equal((h.match(/Built /g) ?? []).length, 1, `${f}: exactly one Built line`);
   }
 });
 
