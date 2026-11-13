@@ -10,17 +10,21 @@
   optIn.textContent = '@view-transition { navigation: auto; } @media (prefers-reduced-motion: reduce) { @view-transition { navigation: none; } }';
   document.head.appendChild(optIn);
 
-  var NAME = 'case-card';
+  // The three pairs of the card-to-band morph (T-037), in this order: the box, the title, the summary.
+  var NAMES = ['case-card', 'case-title', 'case-summary'];
+  // Every element that can carry one of the three names, on either page.
+  var NAMEABLE = '.panel-card, .panel-card > h3, .panel-card > .card-summary, .band, .band > h1, .band > .lead';
   // Home to these two pages morphs the card that leads there into the page's header band (D-041).
   // Every other navigation keeps the browser's 0.25 s crossfade and carries no name.
   var TARGET = /^\/(?:projects\/certway|report)\/$/;
-  // The footer also links to /report/, and D-041 gives it the crossfade: a click on a link outside the cards is
-  // remembered here, and pageswap hands it to the new page through this key.
+  // The morph runs only when the navigation follows a click on a card (G-68): the footer also links to /report/, and
+  // Forward and a script-set location.href also reach a target, and D-041 gives all of them the crossfade. The last
+  // click's link is remembered here, and pageswap hands a crossfade decision to the new page through this key.
   var CROSSFADE_KEY = 'vt-crossfade';
-  var offCard = false;
+  var cardClicked = false;
   addEventListener('click', function (e) {
     var a = e.target && e.target.closest ? e.target.closest('a[href]') : null;
-    offCard = !!a && !a.closest('.panel-card');
+    cardClicked = !!a && !!a.closest('.panel-card');
   }, true);
 
   // Gate for same-document transitions: window.vtSettled() resolves when no
@@ -55,7 +59,7 @@
     return document.referrer ? pathOf(document.referrer) : '';
   }
   function clearNames() {
-    var els = document.querySelectorAll('.panel-card, .band');
+    var els = document.querySelectorAll(NAMEABLE);
     for (var i = 0; i < els.length; i++) els[i].style.viewTransitionName = '';
   }
   function cardFor(path) {
@@ -66,10 +70,25 @@
     }
     return null;
   }
-  function name(el, vt, after) {
-    if (el) el.style.viewTransitionName = NAME;
+  // One side of the morph, in NAMES order. A part that is missing stays null and gets no name.
+  function cardParts(card) {
+    return card ? [card, card.querySelector(':scope > h3'), card.querySelector(':scope > .card-summary')] : [];
+  }
+  function bandParts() {
+    var band = document.querySelector('.band');
+    return band ? [band, band.querySelector(':scope > h1'), band.querySelector(':scope > .lead')] : [];
+  }
+  // The number of lines the band's h1 wraps to; src/style.css scales the old title image by it.
+  function setTitleLines(h1) {
+    if (!h1) return;
+    var lh = parseFloat(getComputedStyle(h1).lineHeight);
+    if (lh > 0) document.documentElement.style.setProperty('--vt-title-lines', String(Math.max(1, Math.round(h1.getBoundingClientRect().height / lh))));
+  }
+  function name(parts, vt, after) {
+    for (var i = 0; i < parts.length; i++) if (parts[i]) parts[i].style.viewTransitionName = NAMES[i];
     function done() {
-      if (el) el.style.viewTransitionName = '';
+      for (var i = 0; i < parts.length; i++) if (parts[i]) parts[i].style.viewTransitionName = '';
+      document.documentElement.style.removeProperty('--vt-title-lines');
       if (after) after();
     }
     vt.finished.then(done, done);
@@ -84,11 +103,11 @@
     var to = e.activation && e.activation.entry ? pathOf(e.activation.entry.url) : '';
     clearNames();
     if (!isPair(from, to)) return;
-    if (offCard) {
+    if (!cardClicked) {
       try { sessionStorage.setItem(CROSSFADE_KEY, '1'); } catch (e) {}
       return;
     }
-    name(cardFor(to), vt);
+    name(cardParts(cardFor(to)), vt);
   });
 
   addEventListener('pagereveal', function (e) {
@@ -103,12 +122,15 @@
       return;
     }
     clearNames();
-    if (!crossfade && isPair(activationFrom(), pathOf(location.href))) name(document.querySelector('.band'), vt, open);
-    else vt.finished.then(open, open);
+    if (!crossfade && isPair(activationFrom(), pathOf(location.href))) {
+      var parts = bandParts();
+      setTitleLines(parts[1]);
+      name(parts, vt, open);
+    } else vt.finished.then(open, open);
   });
   // A restore from the back-forward cache fires pageshow before pagereveal.
   addEventListener('pageshow', function (e) {
-    if (e.persisted) offCard = false;
+    if (e.persisted) cardClicked = false;
     if (e.persisted && settled && 'onpagereveal' in window) arm();
   });
 })();

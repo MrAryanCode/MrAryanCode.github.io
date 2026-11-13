@@ -605,7 +605,9 @@ table.perf th:not(:first-child) { text-align: right; }
 }
 
 /* ---------- Cross-document view transitions (D-041, D-061): the morph timing (the opt-in is inserted by the head script in index.html) ---------- */
-::view-transition-group(case-card) {
+::view-transition-group(case-card),
+::view-transition-group(case-title),
+::view-transition-group(case-summary) {
   animation-duration: 760ms;
   animation-timing-function: cubic-bezier(0.2, 0, 0, 1);
 }
@@ -617,6 +619,18 @@ table.perf th:not(:first-child) { text-align: right; }
 }
 ::view-transition-image-pair(case-card) {
   animation: vt-lift 760ms cubic-bezier(0.2, 0, 0, 1) both;
+}
+/* Title pair (T-037): both images follow the group's height, so the glyphs grow with the box instead of with its
+   width. The old h3 line box is 1.25 x its font size and the new h1's is 1 x, hence 125% and the -12.5% half-leading;
+   --vt-title-lines (set by the head script) is the number of lines the h1 wraps to. */
+::view-transition-old(case-title),
+::view-transition-new(case-title) {
+  width: auto;
+  height: 100%;
+}
+::view-transition-old(case-title) {
+  height: calc(125% / var(--vt-title-lines, 1));
+  inset-block-start: calc(-12.5% / var(--vt-title-lines, 1));
 }
 
 /* ---------- Skeleton probes (removed by T-017 and T-018 when they replace them) ---------- */

@@ -49,13 +49,20 @@ const probe = () => {
     const vt = e.viewTransition;
     log({ ev: "pagereveal", vt: !!vt });
     if (!vt) return;
-    vt.ready.then(() => log({
-      ev: "ready",
-      names: names(),
-      animations: document.getAnimations()
-        .filter((a) => a.effect && a.effect.pseudoElement)
-        .map((a) => ({ pseudo: a.effect.pseudoElement, duration: a.effect.getTiming().duration })),
-    }), () => log({ ev: "ready-rejected" }));
+    vt.ready.then(() => {
+      log({
+        ev: "ready",
+        names: names(),
+        animations: document.getAnimations()
+          .filter((a) => a.effect && a.effect.pseudoElement)
+          .map((a) => ({ pseudo: a.effect.pseudoElement, duration: a.effect.getTiming().duration })),
+      });
+      // Test-only: freeze the transition at t = 0 so the pseudo-element tree can be read over CDP.
+      if (sessionStorage.getItem("__pause") === "1") {
+        for (const a of document.getAnimations()) a.pause();
+        window.__vtPaused = true;
+      }
+    }, () => log({ ev: "ready-rejected" }));
     vt.finished.then(() => log({ ev: "finished" }), () => log({ ev: "finished-rejected" }));
   });
 };
@@ -134,6 +141,38 @@ function summary(log) {
 
 const unique = (names) => new Set(names.map((n) => n.split("@")[0])).size === names.length;
 
+/** The three pairs of the morph (T-037), in document order: the box, the title, the summary. */
+const PAIRS = ["case-card", "case-title", "case-summary"];
+const PAIR_RE = /\((case-card|case-title|case-summary)\)/;
+/** The names each side carries, in the probe's `name@id|class|TAG` form. */
+const swapNames = (card) => [`case-card@${card}`, `case-title@${card}-h`, "case-summary@card-summary"];
+const REVEAL_NAMES = ["case-card@band", "case-title@H1", "case-summary@lead"];
+
+/** The view-transition pseudo-element tree of the page, one indented line per pseudo-element, read over CDP. */
+async function pseudoTree(page) {
+  const cdp = await page.context().newCDPSession(page);
+  const { root } = await cdp.send("DOM.getDocument", { depth: -1, pierce: true });
+  await cdp.detach();
+  const lines = [];
+  const walk = (node, depth) => {
+    for (const p of node.pseudoElements || []) {
+      if (!p.pseudoType.startsWith("view-transition")) continue;
+      lines.push("  ".repeat(depth) + p.pseudoType + (p.pseudoIdentifier ? `(${p.pseudoIdentifier})` : ""));
+      walk(p, depth + 1);
+    }
+  };
+  walk(root.children.find((n) => n.nodeName === "HTML"), 0);
+  return lines;
+}
+
+/** Flat rendering: every group is a child of ::view-transition and has both an old and a new image. */
+const FLAT_TREE = ["view-transition", ...["root", ...PAIRS].flatMap((n) => [
+  `  view-transition-group(${n})`,
+  `    view-transition-image-pair(${n})`,
+  `      view-transition-old(${n})`,
+  `      view-transition-new(${n})`,
+])];
+
 /** Goes from home to the certway page by its card and waits until that page is quiet, so that Back has a page to return to. */
 async function visitCertway(page) {
   await page.click(MORPHS[0].link);
@@ -143,11 +182,24 @@ async function visitCertway(page) {
   await page.waitForTimeout(1000); // past the 0.76 s morph
 }
 
+/** Goes home to certway by its card, then Back to home, and waits until home is quiet, so that Forward has a page to return to. */
+async function visitCertwayAndBack(page) {
+  await visitCertway(page);
+  await page.goBack();
+  await page.waitForURL((u) => u.pathname === "/");
+  await page.waitForFunction(() => window.__hydrated === true);
+  await loaderIdle(page);
+  await page.waitForTimeout(1000); // past the Back crossfade, so its `finished` is not read as the next navigation's
+}
+
 /** The navigations that are not the morph: header links, a script navigation, the 404 link list. */
 const OTHERS = [
   { label: "certway to home (header link)", start: "/projects/certway/", go: (p) => p.click('header a[href="/"]'), url: "/" },
   { label: "report to home (header link)", start: "/report/", go: (p) => p.click('header a[href="/"]'), url: "/" },
   { label: "certway to home (Back)", start: "/", prepare: visitCertway, go: (p) => p.goBack(), url: "/" },
+  // G-68: the morph follows a click on the card in that page's lifetime; Forward and a script-set location.href to a target do not.
+  { label: "home to certway (Forward)", start: "/", prepare: visitCertwayAndBack, go: (p) => p.goForward(), url: "/projects/certway/" },
+  { label: "home to certway (script)", start: "/", go: (p) => p.evaluate(() => { location.href = "/projects/certway/"; }), url: "/projects/certway/" },
   { label: "home to the report (footer link)", start: "/", go: (p) => p.click('footer a[href="/report/"]'), url: "/report/" },
   { label: "certway to the report (script)", start: "/projects/certway/", go: (p) => p.evaluate(() => { location.href = "/report/"; }), url: "/report/" },
   { label: "home to a missing page (script)", start: "/", go: (p) => p.evaluate(() => { location.href = "/nope/x"; }), url: "/nope/x" },
@@ -159,20 +211,42 @@ describe("cross-document transition in chromium", () => {
   before(async () => { browser = await launch("chromium"); });
   after(async () => { await browser?.close(); });
 
-  // (a) The two morphs: old and new snapshots carry the same name, on the card and on the band.
+  // (a) The morphs: old and new snapshots carry the same three names; each group runs 0.76 s.
   for (const m of MORPHS) {
-    test(`(a) ${m.label}: the card and the band carry one name and the group runs 0.76 s`, async () => {
+    test(`(a) ${m.label}: box, title and summary each carry one name on both pages`, async () => {
       const { ctx, page, problems } = await open(browser);
       await page.click(m.link);
       const s = summary(await settle(page, m.url));
-      assert.deepEqual(s.swap, { ev: "pageswap", vt: true, names: [`case-card@${m.card}`] });
+      assert.deepEqual(s.swap, { ev: "pageswap", vt: true, names: swapNames(m.card) });
       assert.equal(s.reveal.vt, true, "the new page received a transition");
-      assert.deepEqual(s.ready.names, ["case-card@band"]);
-      for (const part of ["group", "image-pair", "old", "new"]) {
-        assert.ok(s.pseudos.includes(`::view-transition-${part}(case-card)`), `::view-transition-${part}(case-card) animates: ${s.pseudos.join(" ")}`);
+      assert.deepEqual(s.ready.names, REVEAL_NAMES);
+      for (const n of PAIRS) {
+        for (const part of ["group", "old", "new"]) {
+          assert.ok(s.pseudos.includes(`::view-transition-${part}(${n})`), `::view-transition-${part}(${n}) animates: ${s.pseudos.join(" ")}`);
+        }
+        assert.equal(s.duration(`::view-transition-group(${n})`), 760);
       }
-      assert.equal(s.duration("::view-transition-group(case-card)"), 760);
+      assert.equal(s.duration("::view-transition-group(root)"), 250);
       assert.deepEqual(await page.evaluate(() => window.__names()), [], "the names are removed when the transition finished");
+      assert.deepEqual(problems, []);
+      await ctx.close();
+    });
+
+    test(`(a) ${m.label}: the pseudo-element tree pairs an old and a new image for each name`, async () => {
+      const { ctx, page, problems } = await open(browser);
+      await page.evaluate(() => sessionStorage.setItem("__pause", "1"));
+      await page.click(m.link);
+      await page.waitForURL((u) => u.pathname === m.url);
+      // Paused at ready, or no transition at all: fail at once instead of timing out.
+      await page.waitForFunction(() => window.__vtPaused === true
+        || JSON.parse(sessionStorage.getItem("__vt") || "[]").some((e) => e.ev === "pagereveal" && !e.vt));
+      assert.equal(await page.evaluate(() => window.__vtPaused === true), true, "the transition became ready and paused");
+      assert.deepEqual(await pseudoTree(page), FLAT_TREE);
+      const easing = await page.evaluate((pairs) => pairs.map((n) =>
+        getComputedStyle(document.documentElement, `::view-transition-group(${n})`).animationTimingFunction), PAIRS);
+      assert.deepEqual(easing, PAIRS.map(() => "cubic-bezier(0.2, 0, 0, 1)"));
+      await page.evaluate(() => { sessionStorage.removeItem("__pause"); for (const a of document.getAnimations()) a.play(); });
+      await settle(page, m.url);
       assert.deepEqual(problems, []);
       await ctx.close();
     });
@@ -191,7 +265,7 @@ describe("cross-document transition in chromium", () => {
     assert.equal(s.reveal.vt, true, "the new page received a transition");
     assert.deepEqual(s.ready.names, []);
     assert.ok(s.pseudos.includes("::view-transition-old(root)") && s.pseudos.includes("::view-transition-new(root)"), `the root crossfade runs: ${s.pseudos.join(" ")}`);
-    assert.ok(!s.pseudos.some((p) => p.includes("case-card")), `no morph group: ${s.pseudos.join(" ")}`);
+    assert.ok(!s.pseudos.some((p) => PAIR_RE.test(p)), `no morph group: ${s.pseudos.join(" ")}`);
     assert.equal(s.duration("::view-transition-old(root)"), 250);
     assert.equal(s.duration("::view-transition-new(root)"), 250);
     assert.deepEqual(problems, []);
@@ -241,7 +315,7 @@ describe("cross-document transition in chromium", () => {
     await step(() => page.click(MORPHS[0].link), MORPHS[0].url);
     assert.ok(snapshots.length >= 8, `snapshots taken: ${snapshots.length}`);
     for (const names of snapshots) assert.ok(unique(names), `names at a snapshot: ${names.join(" ")}`);
-    assert.ok(snapshots.every((names) => names.length <= 1), "at most one element is named at a snapshot");
+    assert.ok(snapshots.every((names) => names.length === 0 || names.length === 3), "a snapshot names none or all three parts");
     assert.deepEqual(problems, [], "no duplicate-name error reached the console");
     await ctx.close();
   };
@@ -270,10 +344,14 @@ describe("cross-document transition in chromium", () => {
     assert.ok((await page.locator("h1").first().innerText()).length > 0, "home is readable");
     assert.deepEqual(problems, []);
     await ctx.close();
-    const home = html("index.html");
-    const css = home.match(/href="([^"]+\.css)"/);
-    assert.ok(css, "the built home links its stylesheet");
-    assert.ok(!/<style[^>]*>[^<]*@view-transition/.test(home) && !/@view-transition/.test(readFileSync(dist(css[1].replace(/^\//, "")), "utf8")), "the opt-in is in no <style> of the markup and not in the stylesheet: only the script inserts it");
+    // All four pages: no <style> in the markup holds the opt-in and no linked stylesheet does either; only the script inserts it.
+    for (const file of ["index.html", "projects/certway/index.html", "report/index.html", "404.html"]) {
+      const page = html(file);
+      const sheets = [...page.matchAll(/<link[^>]*rel="stylesheet"[^>]*href="([^"]+)"/g)].map((m) => m[1]);
+      assert.ok(sheets.length > 0, `${file} links its stylesheet`);
+      assert.ok(!/<style[^>]*>[^<]*@view-transition/.test(page), `${file}: no <style> of the markup holds the opt-in`);
+      for (const href of sheets) assert.ok(!/@view-transition/.test(readFileSync(dist(href.replace(/^\//, "")), "utf8")), `${file}: ${href} holds no opt-in`);
+    }
   });
 
   // (e) skipTransition() is followed by a handled ready rejection: no unhandled rejection and no console error.
