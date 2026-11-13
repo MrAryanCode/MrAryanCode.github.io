@@ -64,6 +64,12 @@ for (const c of gpuCases) {
     // Where WebGL2 exists (headless Chromium) a failed or absent WebGPU leaves tier 3 running on WebGL2; a stub that makes
     // every context fake leaves tier 2.
     await page.waitForFunction((want) => document.documentElement.dataset.tier === want, c.chunk ? "2" : "3");
+    // Tier 2 is already the tier while tier 3 loads, so a case that expects the layer chunk waits for its request, then lets
+    // tier 3 finish declining before the tier is read.
+    if (c.chunk) {
+      for (let i = 0; i < 100 && !requests.some((r) => /\/assets\/layer-.*\.js$/.test(r)); i++) await page.waitForTimeout(100);
+      await page.waitForTimeout(500);
+    }
     assert.equal(requests.some((r) => /\/assets\/layer-.*\.js$/.test(r)), c.chunk, `layer chunk requested: ${requests.join(" ")}`);
     assert.ok((await page.locator("main h1").innerText()).length > 0, "the page is readable");
     await page.waitForFunction(() => document.documentElement.dataset.tier);
