@@ -57,7 +57,9 @@ for (const { label, githubSha } of [
         const { ctx, page, requests, logs } = await open(path);
         await page.waitForFunction(() => window.__hydrated === true);
         await page.waitForTimeout(300);
-        assert.deepEqual(logs.filter((l) => !/Failed to load resource.*404/.test(l)), [], `${path} console`);
+        // Two browser notices are not hydration output: the 404 page's own status, and Chrome's warning
+        // when the GPU layer asks for a WebGPU adapter on a runner that has none (seen on ubuntu-26.04).
+        assert.deepEqual(logs.filter((l) => !/Failed to load resource.*404/.test(l) && l !== "warning: No available adapters."), [], `${path} console`);
         assert.deepEqual(await page.evaluate(() => window.__mutations), [], `${path} DOM changed during hydration`);
         assert.ok(!requests.some((r) => r.includes("GITHUB")), `${path} requested the GitHub API`);
         await ctx.close();
