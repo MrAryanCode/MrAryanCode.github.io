@@ -1,8 +1,10 @@
 // Static checks on the built HTML: every route has its content, its own head tags and no stray build tokens.
 import assert from "node:assert/strict";
-import { readdirSync } from "node:fs";
+import { cpSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { after, before, test } from "node:test";
-import { buildAndServe, dist, html, stopAll } from "./helpers.mjs";
+import { buildAndServe, dist, html, root, stopAll } from "./helpers.mjs";
 
 before(() => buildAndServe());
 after(stopAll);
@@ -80,5 +82,34 @@ test("fonts: exactly two preloads with crossorigin, files that exist, @font-face
   const css = files.filter((n) => n.endsWith(".css")).map((n) => html(`assets/${n}`)).join("\n");
   for (const family of ["Geist", "Geist Mono", "Geist fallback", "Geist Mono fallback"]) {
     assert.ok(new RegExp(`@font-face\\s*\\{[^}]*font-family:\\s*["']?${family}["']?[;}]`).test(css), `no @font-face for ${family}`);
+  }
+});
+
+test("the Geist OFL licence ships with the fonts, byte for byte (D-059)", () => {
+  const shipped = readFileSync(dist("fonts", "LICENSE.txt"));
+  assert.ok(shipped.length > 0);
+  assert.ok(shipped.equals(readFileSync(join(root, "node_modules", "@fontsource", "geist", "LICENSE"))));
+});
+
+// Last on purpose: it stops the shared helpers and rebuilds dist/ from a fixture whose description closes the script.
+test("#site-data never holds a raw '<' and still parses back to the same facts (D-059)", async () => {
+  const hostile = "x</script><b>y & z";
+  const dir = mkdtempSync(join(tmpdir(), "site-fixtures-"));
+  try {
+    cpSync(join(root, "test", "fixtures"), dir, { recursive: true });
+    const file = join(dir, "repo-certway.json");
+    writeFileSync(file, JSON.stringify({ ...JSON.parse(readFileSync(file, "utf8")), description: hostile }));
+    await stopAll();
+    await buildAndServe({ fixturesDir: dir });
+    for (const f of ["index.html", "projects/certway/index.html", "report/index.html", "404.html"]) {
+      const h = html(f);
+      assert.ok(!h.includes("</script><b>"), `${f} holds the closing tag raw`);
+      const block = /<script type="application\/json" id="site-data">(.*?)<\/script>/s.exec(h);
+      assert.ok(block, `${f} has no #site-data block`);
+      assert.ok(!block[1].includes("<"), `${f} #site-data has a raw '<'`);
+      assert.equal(JSON.parse(block[1]).facts.repo.description, hostile, `${f} description`);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });

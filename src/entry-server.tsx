@@ -16,7 +16,7 @@ export interface Rendered {
 }
 
 /** `<` must not appear raw inside the JSON script block. */
-const jsonForScript = (v: unknown): string => JSON.stringify(v).replace(/</g, "\u003c");
+const jsonForScript = (v: unknown): string => JSON.stringify(v).replace(/</g, "\\u003c");
 
 // Both variable faces are used in the first paint, so both are preloaded. `crossorigin` is required for fonts.
 const fontPreloads = [geistUrl, geistMonoUrl].map(

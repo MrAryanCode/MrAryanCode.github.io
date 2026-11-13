@@ -28,9 +28,10 @@ const start = (script, args) => {
  * only that runtime reports hydration mismatches (the production runtime hydrates a mismatch silently).
  * `githubSha` is set or deleted in the build's environment explicitly, because GITHUB_SHA is always set on
  * Actions: a string builds with a build stamp, null (the default) builds like a local build, with none.
+ * `fixturesDir` is the directory the fixture API serves; it defaults to test/fixtures.
  */
-export async function buildAndServe({ development = false, githubSha = null } = {}) {
-  start("fixture-api.mjs", [join(root, "test", "fixtures"), String(API_PORT)]);
+export async function buildAndServe({ development = false, githubSha = null, fixturesDir = join(root, "test", "fixtures") } = {}) {
+  start("fixture-api.mjs", [fixturesDir, String(API_PORT)]);
   await sleep(500);
   const env = { ...process.env, SITE_GITHUB_API_URL: `http://127.0.0.1:${API_PORT}`, NODE_ENV: development ? "development" : "production" };
   if (githubSha === null) delete env.GITHUB_SHA;
