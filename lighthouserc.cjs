@@ -6,7 +6,10 @@ module.exports = {
       staticDistDir: './dist',
       url: pages.map((p) => `http://localhost${p.path}`),
       numberOfRuns: 3,
-      settings: process.env.LHCI_NO_SANDBOX ? { chromeFlags: '--no-sandbox' } : {},
+      settings: {
+        blockedUrlPatterns: ['https://api.github.com/*'],
+        ...(process.env.LHCI_NO_SANDBOX ? { chromeFlags: '--no-sandbox' } : {}),
+      },
     },
     assert: {
       includePassedAssertions: true,

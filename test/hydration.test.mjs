@@ -44,6 +44,9 @@ for (const { label, githubSha } of [
       const requests = [];
       const logs = [];
       ctx.on("request", (r) => requests.push(new URL(r.url()).port === "4611" ? "GITHUB-FIXTURE" : new URL(r.url()).pathname));
+      // The live read (T-027) asks api.github.com after hydration. The route holds every request unanswered, so the
+      // page never changes after hydrating and the 300 ms no-DOM-change window below proves hydration alone.
+      await ctx.route("https://api.github.com/**", () => {});
       const page = await ctx.newPage();
       page.on("console", (m) => logs.push(`${m.type()}: ${m.text()}`));
       page.on("pageerror", (e) => logs.push(`pageerror: ${e.message}`));

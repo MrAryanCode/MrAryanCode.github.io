@@ -1,5 +1,5 @@
 import { Show } from "solid-js";
-import { formatUtc, type Facts } from "../facts";
+import { formatCount, formatUtc, type Facts } from "../facts";
 
 // The signed step 3 copy of the certway facts (design.md DS-03, D-025).
 const COPY_AT_STEP_3_LIVE_FAIL_NOTE = "Live facts could not be read. Showing the facts from when this page was built.";
@@ -28,7 +28,7 @@ export function FactsCard(props: { facts: Facts }) {
         </Show>
         <div class="tile">
           <dt class="tile-label">Stars</dt>
-          <dd class="tile-value"><span data-fact="stars">{props.facts.repo.stars}</span></dd>
+          <dd class="tile-value"><span data-fact="stars">{formatCount(props.facts.repo.stars)}</span></dd>
         </div>
         <div class="tile">
           <dt class="tile-label">Last push</dt>

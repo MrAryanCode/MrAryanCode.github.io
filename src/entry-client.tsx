@@ -1,6 +1,7 @@
 import { hydrate } from "solid-js/web";
 import { App } from "./App";
 import type { Build, Facts } from "./facts";
+import { runLiveFacts } from "./live";
 import type { RouteId } from "./routes";
 import "./fonts.css";
 import "./style.css";
@@ -14,3 +15,4 @@ const data = JSON.parse(document.getElementById("site-data")!.textContent!) as {
 };
 hydrate(() => <App route={data.route} facts={data.facts} build={data.build} />, document.getElementById("root")!);
 (window as unknown as { __hydrated: boolean }).__hydrated = true;
+void runLiveFacts(data.facts, document.getElementById("root")!);

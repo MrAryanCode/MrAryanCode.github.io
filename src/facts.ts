@@ -7,6 +7,11 @@ export function formatUtc(iso: string): string {
   return `${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC`;
 }
 
+/** 12345 -> "12,345". Counts above 999 are grouped with a comma; no Intl, no locale (design.md DS-03, D-025). */
+export function formatCount(n: number): string {
+  return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+}
+
 /** The commit and the time the build started: the same pair on every page of one build, or null for a local build. */
 export interface Build {
   /** The full 40-character commit, from GITHUB_SHA. */

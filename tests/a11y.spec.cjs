@@ -2,11 +2,13 @@ const { test, expect } = require('@playwright/test');
 const AxeBuilder = require('@axe-core/playwright').default;
 const fs = require('fs');
 const pages = require('../quality/pages.json');
+const { mockGithub } = require('./acceptance/github-mock.cjs');
 
 fs.mkdirSync('reports/axe', { recursive: true });
 
 for (const p of pages) {
   test(`axe ${p.file}`, async ({ page }) => {
+    await mockGithub(page); // the live read is answered by the fixtures, never by the real API
     await page.goto(p.path);
     await page.waitForFunction(() => window.__hydrated === true);
     const results = await new AxeBuilder({ page })

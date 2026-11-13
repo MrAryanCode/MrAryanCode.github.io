@@ -2,6 +2,7 @@
 import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 import { chromium } from "playwright";
+import { mockGithub } from "../tests/acceptance/github-mock.cjs";
 import { BASE, buildAndServe, stopAll } from "./helpers.mjs";
 
 let browser;
@@ -20,6 +21,7 @@ async function open(path, { js = true, init = [], route } = {}) {
   const logs = [];
   ctx.on("request", (r) => requests.push(new URL(r.url()).pathname + (new URL(r.url()).port === "4611" ? " [GITHUB-FIXTURE]" : "")));
   const page = await ctx.newPage();
+  await mockGithub(page); // the live read (T-027) is answered by the fixtures, never by the real API
   page.on("console", (m) => logs.push(`${m.type()}: ${m.text()}`));
   page.on("pageerror", (e) => logs.push(`pageerror: ${e.message}`));
   for (const s of init) await page.addInitScript(s);
@@ -86,6 +88,7 @@ for (const c of [
   test(`underline draw: ${c.name}`, async () => {
     const ctx = await browser.newContext(c.ctx);
     const page = await ctx.newPage();
+    await mockGithub(page);
     for (const s of c.init) await page.addInitScript(s);
     await page.goto(BASE + "/", { waitUntil: "load" });
     for (const how of ["hover", "focus"]) {
