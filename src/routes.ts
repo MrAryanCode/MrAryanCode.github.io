@@ -15,6 +15,8 @@ export interface Route {
   /** Open Graph image: /og/<ogSlug>.png */
   ogSlug: RouteId;
   ogAlt: string;
+  /** The two text lines drawn on the card. Absent on the 404 route, which has no card of its own (D-033). */
+  ogCard?: [string, string];
   /** The 404 page has no canonical URL. */
   canonical: boolean;
 }
@@ -24,40 +26,48 @@ export const routes: Route[] = [
     id: "home",
     path: "/",
     file: "index.html",
-    title: "Aryan Miri | MrAryanCode",
-    description: "Remote full-stack developer. Every fact on this page is read from GitHub at build time.",
+    title: "Aryan Miri | Full-stack developer",
+    description:
+      "Full-stack developer who builds web products end to end and ships them with tests and CI. Open to remote full-stack roles, full-time or contract.",
     ogSlug: "home",
-    ogAlt: "Aryan Miri, full-stack developer",
+    ogAlt: 'Card with the text "Aryan Miri" and "Full-stack developer".',
+    ogCard: ["Aryan Miri", "Full-stack developer"],
     canonical: true,
   },
   {
     id: "certway",
     path: "/projects/certway/",
     file: "projects/certway/index.html",
-    title: "certway case study | MrAryanCode",
-    description: "How certway is built, with every number read from GitHub when the site was built.",
+    title: "certway case study | Aryan Miri",
+    description:
+      "A case study of certway, written in Rust: one static binary that gets and renews TLS certificates from Let's Encrypt on Linux and macOS. How it is built, tested and released, pinned to v1.0.1.",
     ogSlug: "certway",
-    ogAlt: "certway case study card",
+    ogAlt: 'Card with the text "certway case study" and "Aryan Miri, Full-stack developer".',
+    ogCard: ["certway case study", "Aryan Miri · Full-stack developer"],
     canonical: true,
   },
   {
     id: "report",
     path: "/report/",
     file: "report/index.html",
-    title: "Engineering report | MrAryanCode",
-    description: "An engineering report on how this site is prerendered, measured and tested.",
+    title: "Engineering report | Aryan Miri",
+    description:
+      "How this site is built: the checks every deploy must pass, with the numbers from the build you are reading.",
     ogSlug: "report",
-    ogAlt: "Engineering report card",
+    ogAlt: 'Card with the text "Engineering report" and "Aryan Miri, Full-stack developer".',
+    ogCard: ["Engineering report", "Aryan Miri · Full-stack developer"],
     canonical: true,
   },
   {
     id: "notfound",
     path: "/404.html",
     file: "404.html",
-    title: "Page not found | MrAryanCode",
-    description: "This address does not exist on mraryancode.github.io.",
+    title: "404: Page not found | Aryan Miri",
+    description: "This page does not exist.",
+    // No card and no alt text (D-033). The field stays a string and the slug stays "home" only because head.ts
+    // (T-014) still prints og:image and og:image:alt for every route; T-014 drops both for 404.
     ogSlug: "home",
-    ogAlt: "Aryan Miri, full-stack developer",
+    ogAlt: "",
     canonical: false,
   },
 ];

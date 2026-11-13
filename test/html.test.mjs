@@ -4,15 +4,20 @@ import { cpSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync }
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
+import { contact } from "../src/content/contact.ts";
+import * as identity from "../src/content/identity.ts";
+import * as skills from "../src/content/skills.ts";
+import * as working from "../src/content/working.ts";
+import { routes } from "../src/routes.ts";
 import { buildAndServe, dist, html, root, stopAll } from "./helpers.mjs";
 
 before(() => buildAndServe());
 after(stopAll);
 
 const pages = [
-  { file: "index.html", url: "https://mraryancode.github.io/", h1: "Aryan Miri", title: "Aryan Miri | MrAryanCode", og: "home" },
-  { file: "projects/certway/index.html", url: "https://mraryancode.github.io/projects/certway/", h1: "certway case study", title: "certway case study | MrAryanCode", og: "certway" },
-  { file: "report/index.html", url: "https://mraryancode.github.io/report/", h1: "Engineering report", title: "Engineering report | MrAryanCode", og: "report" },
+  { file: "index.html", url: "https://mraryancode.github.io/", h1: "Aryan Miri", title: "Aryan Miri | Full-stack developer", og: "home" },
+  { file: "projects/certway/index.html", url: "https://mraryancode.github.io/projects/certway/", h1: "certway case study", title: "certway case study | Aryan Miri", og: "certway" },
+  { file: "report/index.html", url: "https://mraryancode.github.io/report/", h1: "Engineering report", title: "Engineering report | Aryan Miri", og: "report" },
 ];
 
 for (const p of pages) {
@@ -32,6 +37,7 @@ for (const p of pages) {
 test("404.html: content, no canonical", () => {
   const h = html("404.html");
   assert.match(h, /<h1[^>]*>Page not found<\/h1>/);
+  assert.ok(h.includes("<title>404: Page not found | Aryan Miri</title>"));
   assert.ok(!h.includes('rel="canonical"'));
 });
 
@@ -89,6 +95,120 @@ test("the Geist OFL licence ships with the fonts, byte for byte (D-059)", () => 
   const shipped = readFileSync(dist("fonts", "LICENSE.txt"));
   assert.ok(shipped.length > 0);
   assert.ok(shipped.equals(readFileSync(join(root, "node_modules", "@fontsource", "geist", "LICENSE"))));
+});
+
+// The signed step 3 copy (design.md DS-00 and DS-11), written out here on purpose: the test must fail when a string in
+// src/ changes, so it never reads its expected values from the modules it checks.
+const COPY_AT_STEP_3_ROUTE_COPY = {
+  home: {
+    title: "Aryan Miri | Full-stack developer",
+    description: "Full-stack developer who builds web products end to end and ships them with tests and CI. Open to remote full-stack roles, full-time or contract.",
+    ogAlt: 'Card with the text "Aryan Miri" and "Full-stack developer".',
+  },
+  certway: {
+    title: "certway case study | Aryan Miri",
+    description: "A case study of certway, written in Rust: one static binary that gets and renews TLS certificates from Let's Encrypt on Linux and macOS. How it is built, tested and released, pinned to v1.0.1.",
+    ogAlt: 'Card with the text "certway case study" and "Aryan Miri, Full-stack developer".',
+  },
+  report: {
+    title: "Engineering report | Aryan Miri",
+    description: "How this site is built: the checks every deploy must pass, with the numbers from the build you are reading.",
+    ogAlt: 'Card with the text "Engineering report" and "Aryan Miri, Full-stack developer".',
+  },
+  notfound: { title: "404: Page not found | Aryan Miri", description: "This page does not exist." },
+};
+const COPY_AT_STEP_3_CARD_LINES = {
+  home: ["Aryan Miri", "Full-stack developer"],
+  certway: ["certway case study", "Aryan Miri · Full-stack developer"],
+  report: ["Engineering report", "Aryan Miri · Full-stack developer"],
+};
+const COPY_AT_STEP_3_REPORT_LEAD = "How this site is built: the checks every deploy must pass, with the numbers from the build you are reading.";
+const COPY_AT_STEP_3_AVAILABILITY = ["Open to remote full-stack roles, full-time or contract.", "Based in Tehran (UTC+03:30)."];
+const GITHUB = "https://github.com/MrAryanCode/";
+
+test("route titles, descriptions, ogAlt and ogCard equal the signed copy; 404 has title and description only", () => {
+  assert.deepEqual(routes.map((r) => r.id), ["home", "certway", "report", "notfound"]);
+  for (const r of routes) {
+    const want = COPY_AT_STEP_3_ROUTE_COPY[r.id];
+    assert.equal(r.title, want.title, `${r.id} title`);
+    assert.equal(r.description, want.description, `${r.id} description`);
+    if (r.id === "notfound") {
+      assert.equal(r.ogAlt, "", "404 has no ogAlt");
+      assert.equal(r.ogCard, undefined, "404 has no ogCard");
+    } else {
+      assert.equal(r.ogAlt, want.ogAlt, `${r.id} ogAlt`);
+      assert.deepEqual(r.ogCard, COPY_AT_STEP_3_CARD_LINES[r.id], `${r.id} ogCard`);
+    }
+  }
+  assert.equal(COPY_AT_STEP_3_ROUTE_COPY.report.description, COPY_AT_STEP_3_REPORT_LEAD);
+  assert.ok(COPY_AT_STEP_3_ROUTE_COPY.home.description.includes(COPY_AT_STEP_3_AVAILABILITY[0]), "home description holds the availability sentence word for word");
+});
+
+test("the content modules equal the signed copy (identity, skills, working, contact)", () => {
+  assert.equal(identity.COPY_AT_STEP_3_HOME_H1, "Aryan Miri");
+  assert.equal(identity.COPY_AT_STEP_3_ROLE_LINE, "Full-stack developer. I build web products end to end and ship them with tests and CI.");
+  assert.match(identity.COPY_AT_STEP_3_ROLE_LINE, /full-stack/i);
+  assert.deepEqual(identity.COPY_AT_STEP_3_AVAILABILITY, COPY_AT_STEP_3_AVAILABILITY);
+  assert.equal(identity.COPY_AT_STEP_3_CERTWAY_SUMMARY, "HTTPS in one command. One static binary that gets and renews TLS certificates from Let's Encrypt on Linux and macOS.");
+  assert.equal(identity.COPY_AT_STEP_3_SITE_SUMMARY, "The site you are reading. It goes live only when every one of these checks passes:");
+  assert.deepEqual(identity.COPY_AT_STEP_3_SITE_CHECKS.map((c) => c.text), [
+    "Unit tests",
+    "Acceptance tests in Chromium, Firefox and WebKit",
+    "Accessibility check on every page (axe-core)",
+    "Performance check (Lighthouse)",
+    "HTML validation (Nu Html Checker)",
+    "Link check (lychee)",
+  ]);
+
+  assert.equal(skills.COPY_AT_STEP_3_SKILLS_HEADING, "Skills");
+  assert.equal(skills.COPY_AT_STEP_3_SKILLS_SHIPPED_HEADING, "Shipped in public");
+  assert.equal(skills.COPY_AT_STEP_3_SKILLS_ALSO_HEADING, "Also worked with");
+  assert.deepEqual(
+    skills.COPY_AT_STEP_3_SKILLS_SHIPPED.map((i) => ({ label: i.label, url: i.url, skills: i.skills.map((s) => (typeof s === "string" ? s : s.text)) })),
+    [
+      { label: "certway", url: `${GITHUB}certway`, skills: ["Rust"] },
+      { label: "This site", url: `${GITHUB}MrAryanCode.github.io`, skills: ["TypeScript", "SolidJS", "Vite", "Node.js", "Playwright", "HTML and CSS", "GitHub Actions"] },
+      { label: "GitHub profile", url: `${GITHUB}MrAryanCode`, skills: ["Python", "GitHub Actions"] },
+    ],
+  );
+  for (const s of skills.COPY_AT_STEP_3_SKILLS_SHIPPED[1].skills) assert.ok(s.file && s.marker, `${s.text} has a file and a marker`);
+  for (const c of identity.COPY_AT_STEP_3_SITE_CHECKS) assert.ok(c.file && c.marker, `${c.text} has a file and a marker`);
+  assert.equal(skills.COPY_AT_STEP_3_SKILLS_ALSO, "Go · React, Svelte · .NET · Flutter");
+
+  assert.equal(working.COPY_AT_STEP_3_WORKING_HEADING, "Working with me");
+  assert.equal(working.COPY_AT_STEP_3_WORKING_START, "Telegram is the fastest way to reach me. Send the role and what your team is building.");
+  assert.deepEqual(working.COPY_AT_STEP_3_WORKING_LINKS, {
+    telegram: { label: "Message me on Telegram", url: "https://t.me/aryan_61_04" },
+    email: { label: "Email", text: "mraryanmiri@gmail.com", url: "mailto:mraryanmiri@gmail.com" },
+  });
+
+  assert.deepEqual(contact, {
+    email: "mraryanmiri@gmail.com",
+    emailUrl: "mailto:mraryanmiri@gmail.com",
+    telegramUrl: "https://t.me/aryan_61_04",
+    telegramHandle: "@aryan_61_04",
+    githubUrl: "https://github.com/MrAryanCode",
+    githubHandle: "@MrAryanCode",
+    channelUrl: "https://t.me/MrAryanCode",
+    channelHandle: "@MrAryanCode",
+    cv: null,
+  });
+});
+
+test("no content string is empty, and no CV value or link exists (D-013, P-02.4)", () => {
+  const strings = [];
+  const walk = (v) => {
+    if (typeof v === "string") strings.push(v);
+    else if (v && typeof v === "object") Object.values(v).forEach(walk);
+  };
+  for (const m of [identity, skills, working, contact]) walk(m);
+  assert.ok(strings.length > 40, "the walk found the content strings");
+  for (const s of strings) assert.ok(s.trim().length > 0, "an empty content string");
+  assert.equal(contact.cv, null);
+  for (const [k, v] of Object.entries(contact)) assert.ok(k === "cv" || !/cv/i.test(String(v)), `${k} looks like a CV value`);
+  for (const f of ["index.html", "projects/certway/index.html", "report/index.html", "404.html"]) {
+    for (const [, href] of html(f).matchAll(/<a\s[^>]*href="([^"]*)"/g)) assert.ok(!/cv/i.test(href), `${f} links to ${href}`);
+  }
 });
 
 // Last on purpose: it stops the shared helpers and rebuilds dist/ from a fixture whose description closes the script.
