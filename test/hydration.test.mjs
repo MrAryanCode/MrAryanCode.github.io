@@ -81,7 +81,7 @@ for (const { label, githubSha } of [
         assert.match(data.build.builtAt, /^\d{4}-\d\d-\d\dT[\d:.]+Z$/);
         assert.equal(await stamp.getAttribute("href"), commit + githubSha);
         assert.equal(await stamp.innerText(), githubSha.slice(0, 7));
-        assert.match(await page.locator("footer p").last().innerText(), /^Built \d{4}-\d\d-\d\d \d\d:\d\d UTC from 0123456$/);
+        assert.match(await page.locator("footer p").last().innerText(), /^Built \d{4}-\d\d-\d\d from 0123456$/);
       }
       await ctx.close();
     });

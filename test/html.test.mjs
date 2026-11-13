@@ -76,6 +76,20 @@ test("404.html: root-absolute hrefs in main and no aria-current anywhere", () =>
   assert.ok(!h.includes("aria-current"), "no link points at the 404 page itself");
 });
 
+test("aria-current=page: the identity link on home and the footer Engineering report link on /report/, nothing on the other pages", () => {
+  const current = (file) => [...plain(file).matchAll(/<a\s[^>]*aria-current="page"[^>]*>/g)].map((m) => m[0]);
+  const home = current("index.html");
+  assert.equal(home.length, 1, "home has exactly one aria-current");
+  assert.match(home[0], /href="\/"/);
+  assert.ok(/<header[^>]*>.*?<\/header>/s.exec(plain("index.html"))[0].includes(home[0]), "home: it is in the header");
+  const report = current("report/index.html");
+  assert.equal(report.length, 1, "report has exactly one aria-current");
+  assert.match(report[0], /href="\/report\/"/);
+  assert.ok(/<footer[^>]*>.*?<\/footer>/s.exec(plain("report/index.html"))[0].includes(report[0]), "report: it is in the footer");
+  assert.deepEqual(current("projects/certway/index.html"), []);
+  assert.deepEqual(current("404.html"), []);
+});
+
 test("D-051 hooks: data-field-kind 0 on the 404 hero and 4 on every footer, data-fx arrow on each 404 row, progress on every page", () => {
   const notFound = plain("404.html");
   assert.equal((notFound.match(/<div class="not-found" data-field-kind="0">/g) ?? []).length, 1, "404 hero kind 0");

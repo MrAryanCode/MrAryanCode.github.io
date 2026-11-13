@@ -1,6 +1,7 @@
 import { Show, type JSX } from "solid-js";
 import { contact } from "../content/contact";
 import type { Build } from "../facts";
+import type { RouteId } from "../routes";
 
 const REPO_URL = "https://github.com/MrAryanCode/MrAryanCode.github.io";
 const COMMIT_URL = `${REPO_URL}/commit/`;
@@ -9,14 +10,14 @@ const COMMIT_URL = `${REPO_URL}/commit/`;
  * The chrome of every page (design.md DS-01): skip link, header, the reading progress bar, the page in `main`, footer.
  * The pause control is not here: the enhancement loader creates it after hydration (T-019).
  */
-export function Layout(props: { children: JSX.Element; build: Build | null }) {
+export function Layout(props: { children: JSX.Element; build: Build | null; route?: RouteId }) {
   return (
     <>
       <a class="skip" href="#main">Skip to content</a>
       <header>
         {/* Hidden until the reading effect drives it (T-033); the progress bar is not content. */}
         <div data-fx="progress" aria-hidden="true"></div>
-        <a href="/">
+        <a href="/" aria-current={props.route === "home" ? "page" : undefined}>
           <span>
             Aryan Miri<br />{" "}
             <small>MrAryanCode</small>
@@ -39,7 +40,7 @@ export function Layout(props: { children: JSX.Element; build: Build | null }) {
           <nav aria-label="This site">
             <p>This site</p>
             <p><a href={REPO_URL}>Source code (MIT license)</a></p>
-            <p><a href="/report/">Engineering report</a></p>
+            <p><a href="/report/" aria-current={props.route === "report" ? "page" : undefined}>Engineering report</a></p>
           </nav>
         </div>
         <p>© 2026 Aryan Miri. Text and images are not licensed for reuse.</p>
