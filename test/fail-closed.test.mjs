@@ -6,6 +6,7 @@
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
+import { get } from "node:http";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -24,10 +25,18 @@ after(async () => {
   if (api.exitCode === null && api.signalCode === null) await new Promise((resolve) => { api.once("exit", resolve); api.kill(); });
 });
 
-const mode = async (query) => {
-  const r = await fetch(`http://127.0.0.1:${API_PORT}/__mode?${query}`);
-  assert.equal(r.status, 200);
-};
+// A fresh connection each time (agent: false): the build above blocks this process for up to 15 s, and a pooled
+// keep-alive connection that the fixture API closed meanwhile made fetch fail with "other side closed".
+const mode = (query) =>
+  new Promise((resolve, reject) => {
+    get(`http://127.0.0.1:${API_PORT}/__mode?${query}`, { agent: false }, (res) => {
+      res.resume();
+      res.on("end", () => {
+        assert.equal(res.statusCode, 200);
+        resolve();
+      });
+    }).on("error", reject);
+  });
 
 function build() {
   const env = { ...process.env, SITE_GITHUB_API_URL: `http://127.0.0.1:${API_PORT}`, NODE_ENV: "production" };
