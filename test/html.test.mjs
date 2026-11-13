@@ -204,7 +204,7 @@ test("home: the skills panels show the shipped items, each skill joined by comma
   const items = [...(/<ul>(.*?)<\/ul>/s.exec(section)[1]).matchAll(/<li>(.*?)<\/li>/gs)].map((m) => stripTags(m[1]));
   assert.deepEqual(items, [
     "certway: Rust",
-    "This site: TypeScript, SolidJS, Vite, Node.js, Playwright, HTML and CSS, GitHub Actions, Web Animations API, Web Workers",
+    "This site: TypeScript, SolidJS, Vite, Node.js, Playwright, HTML and CSS, GitHub Actions, Web Animations API, Web Workers, WebGPU",
     "GitHub profile: Python, GitHub Actions",
   ]);
   assert.ok(section.includes("<p>Go · React, Svelte · .NET · Flutter</p>"));
@@ -372,7 +372,7 @@ test("the content modules equal the signed copy (identity, skills, working, cont
     skills.COPY_AT_STEP_3_SKILLS_SHIPPED.map((i) => ({ label: i.label, url: i.url, skills: i.skills.map((s) => (typeof s === "string" ? s : s.text)) })),
     [
       { label: "certway", url: `${GITHUB}certway`, skills: ["Rust"] },
-      { label: "This site", url: `${GITHUB}MrAryanCode.github.io`, skills: ["TypeScript", "SolidJS", "Vite", "Node.js", "Playwright", "HTML and CSS", "GitHub Actions", "Web Animations API", "Web Workers"] },
+      { label: "This site", url: `${GITHUB}MrAryanCode.github.io`, skills: ["TypeScript", "SolidJS", "Vite", "Node.js", "Playwright", "HTML and CSS", "GitHub Actions", "Web Animations API", "Web Workers", "WebGPU"] },
       { label: "GitHub profile", url: `${GITHUB}MrAryanCode`, skills: ["Python", "GitHub Actions"] },
     ],
   );

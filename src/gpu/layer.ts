@@ -274,10 +274,12 @@ export async function createWebGpu(canvas: HTMLCanvasElement, adapter: Dyn, onLo
   };
   setMask(null, 1, 1);
 
-  const encode = (uniforms: ArrayBuffer, copy: { r0: number; n: number; buf: Dyn; rowBytes: number } | null): Dyn => {
+  // `copy` is a readback (the seek hook's): the frame goes to a texture of its own and is copied from there. Copying out of
+  // the canvas's current texture lost the device on the CI runner's SwiftShader adapter.
+  const encode = (uniforms: ArrayBuffer, copy: { r0: number; n: number; buf: Dyn; rowBytes: number; tex: Dyn } | null): void => {
     device.queue.writeBuffer(ubo, 0, uniforms);
     const enc = device.createCommandEncoder();
-    const tex = ctx.getCurrentTexture();
+    const tex = copy ? copy.tex : ctx.getCurrentTexture();
     const pass = enc.beginRenderPass({
       colorAttachments: [{ view: tex.createView(), loadOp: "clear", storeOp: "store", clearValue: { r: 0, g: 0, b: 0, a: 1 } }],
     });
@@ -312,8 +314,10 @@ export async function createWebGpu(canvas: HTMLCanvasElement, adapter: Dyn, onLo
       if (lost || n === 0) return new Uint8Array(0);
       const rowBytes = Math.ceil((cw * 4) / 256) * 256;
       const buf = device.createBuffer({ size: rowBytes * n, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
-      encode(uniforms, { r0: row, n, buf, rowBytes });
+      const tex = device.createTexture({ size: [cw, ch], format, usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC });
+      encode(uniforms, { r0: row, n, buf, rowBytes, tex });
       await buf.mapAsync(GPUMapMode.READ);
+      tex.destroy();
       const src = new Uint8Array(buf.getMappedRange());
       const out = new Uint8Array(cw * n * 4);
       const bgra = format.startsWith("bgra");
