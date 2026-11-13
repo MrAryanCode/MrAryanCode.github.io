@@ -201,8 +201,8 @@ for (const [engine, type] of Object.entries(ENGINES)) {
         window.__emptyAt = [];
         const chunkFrames = window.__seen;
         const poll = () => {
-          if (chunkFrames.frames !== (window.__lastCount ?? -1)) { window.__lastCount = chunkFrames.frames; window.__lastFrameAt = performance.now(); }
           if (chunkFrames.empties > window.__emptyAt.length) window.__emptyAt.push(performance.now());
+          else if (chunkFrames.empties === 0 && chunkFrames.frames !== (window.__lastCount ?? -1)) { window.__lastCount = chunkFrames.frames; window.__lastFrameAt = performance.now(); }
           requestAnimationFrame(poll);
         };
         poll();
@@ -253,18 +253,27 @@ const trackSteps = () => {
 };
 const CANVAS = "body > div[aria-hidden='true'] canvas";
 const TRACE = "trace:20fps";
-// The centre-row brightness the tracer adds in the left margin, in 0-255 units; calibrated from the measured values.
+// The centre-row brightness change the tracer makes in the left rail, in 0-255 units. Measured: -5.1 (Chromium) and -5.2
+// (Firefox) with the tracer drawn; -0.04 and -0.21 with its term 0 (pinned at rank 5).
 const TRACER_MIN = 3;
 
-/** The left margin's mean brightness on the viewport's centre rows minus on rows 70 to 120 px above and below: the reading
- *  tracer (kind 5, at the centre of the viewport) is the only thing that lifts the centre rows. Mean of three screenshots. */
+/** The left rail's mean brightness (the strip 16 to 150 px outside the reading column, where kind 5 draws the tracer) on the
+ *  viewport's centre rows minus on rows 70 to 120 px above and below: the reading tracer (a band 18 px either side of the
+ *  viewport's centre) is the only thing that changes the centre rows (the light theme, the default here, makes them darker,
+ *  so the sign differs by theme and the cases compare the magnitude). Mean of three screenshots. */
 async function tracerExcess(page) {
+  const colL = await page.evaluate(() => {
+    const el = document.querySelector(".reading");
+    return el.getBoundingClientRect().left + parseFloat(getComputedStyle(el).paddingLeft);
+  });
+  const x0 = Math.max(0, Math.round(colL - 150));
+  const width = Math.round(colL - 16) - x0;
   const lum = async () => {
-    const { data, info } = await sharp(await page.screenshot({ clip: { x: 0, y: 0, width: 200, height: 768 } })).raw().toBuffer({ resolveWithObject: true });
+    const { data, info } = await sharp(await page.screenshot({ clip: { x: x0, y: 0, width, height: 768 } })).raw().toBuffer({ resolveWithObject: true });
     const row = (y) => { let sum = 0; for (let x = 0; x < info.width; x++) { const o = (y * info.width + x) * info.channels; sum += data[o] + data[o + 1] + data[o + 2]; } return sum / (3 * info.width); };
     const range = (a, b) => Array.from({ length: b - a }, (_, k) => a + k);
     const mean = (ys) => ys.reduce((a, y) => a + row(y), 0) / ys.length;
-    return mean(range(372, 396)) - mean([...range(384 - 120, 384 - 70), ...range(384 + 70, 384 + 120)]);
+    return mean(range(375, 394)) - mean([...range(384 - 120, 384 - 70), ...range(384 + 70, 384 + 120)]);
   };
   let sum = 0;
   for (let k = 0; k < 3; k++) { sum += await lum(); await page.waitForTimeout(150); }
@@ -468,7 +477,7 @@ for (const [engine, type] of Object.entries(ENGINES)) {
         await scrollIntoReading(page);
         const on = await tracerExcess(page);
         console.log(`  tracer ${engine}: centre-row excess ${on.toFixed(2)}`);
-        assert.ok(on > TRACER_MIN, `the tracer lifts the centre rows by ${on.toFixed(2)}`);
+        assert.ok(Math.abs(on) > TRACER_MIN, `the tracer changes the centre rows by ${on.toFixed(2)}`);
         await ctx.close();
       });
 
@@ -478,7 +487,7 @@ for (const [engine, type] of Object.entries(ENGINES)) {
         await scrollIntoReading(page);
         const off = await tracerExcess(page);
         console.log(`  tracer ${engine} pinned 5: centre-row excess ${off.toFixed(2)}`);
-        assert.ok(off < TRACER_MIN / 3, `no tracer at rank 5: excess ${off.toFixed(2)}`);
+        assert.ok(Math.abs(off) < TRACER_MIN / 3, `no tracer at rank 5: excess ${off.toFixed(2)}`);
         await ctx.close();
       });
 
@@ -489,7 +498,7 @@ for (const [engine, type] of Object.entries(ENGINES)) {
         await page.evaluate(() => document.querySelector(".pause").click());
         await page.waitForFunction(() => document.documentElement.dataset.field === undefined);
         const off = await tracerExcess(page);
-        assert.ok(off < TRACER_MIN / 3, `no tracer while paused: excess ${off.toFixed(2)}`);
+        assert.ok(Math.abs(off) < TRACER_MIN / 3, `no tracer while paused: excess ${off.toFixed(2)}`);
         await ctx.close();
       });
 
@@ -498,7 +507,7 @@ for (const [engine, type] of Object.entries(ENGINES)) {
         await page.waitForFunction(() => document.documentElement.dataset.tier === "0");
         await scrollIntoReading(page);
         const off = await tracerExcess(page);
-        assert.ok(off < TRACER_MIN / 3, `no tracer under reduced motion: excess ${off.toFixed(2)}`);
+        assert.ok(Math.abs(off) < TRACER_MIN / 3, `no tracer under reduced motion: excess ${off.toFixed(2)}`);
         await ctx.close();
       });
     });
@@ -509,29 +518,42 @@ for (const [engine, type] of Object.entries(ENGINES)) {
 // it is instant under reduced motion and under html[data-motion="paused"]; and the step-down level does not change it.
 async function underlineRuns(page, how) {
   const link = page.locator('a[href="/report/"]').first();
+  // The page records each underline transition when it starts (transitionrun), with its duration and the line's anchor at
+  // that moment, so a main thread kept busy by the field cannot make a later read miss a transition that already ended.
+  await link.evaluate((el) => {
+    window.__ul = [];
+    el.addEventListener("transitionrun", (e) => {
+      if (e.propertyName !== "background-size") return;
+      window.__ul.push({
+        ms: el.getAnimations().filter((a) => a.transitionProperty === "background-size").map((a) => a.effect.getTiming().duration),
+        from: getComputedStyle(el).backgroundPositionX.split(",")[0].trim(),
+      });
+    });
+  });
+  const take = async () => {
+    await page.waitForTimeout(500);
+    const runs = await page.evaluate(() => window.__ul.splice(0));
+    // No transition started (reduced motion, paused): the line is instant and its anchor is read as it stands.
+    return runs[0] ?? { ms: [], from: await link.evaluate((el) => getComputedStyle(el).backgroundPositionX.split(",")[0].trim()) };
+  };
   // Chromium does not start a transition on the first link hover of a page that runs script (pages without script do),
   // so hover once and wait for the line to settle before measuring.
   await link.hover();
   await page.mouse.move(0, 0);
   await page.waitForTimeout(600);
+  await page.evaluate(() => window.__ul.splice(0));
   if (how === "focus") {
     for (let i = 0; i < 40 && !(await link.evaluate((el) => el.matches(":focus-visible"))); i++) await page.keyboard.press("Tab");
   } else {
     await link.hover();
   }
-  const draw = await link.evaluate((el) => ({
-    ms: el.getAnimations().filter((a) => a.transitionProperty === "background-size").map((a) => a.effect.getTiming().duration),
-    from: getComputedStyle(el).backgroundPositionX.split(",")[0].trim(),
-  }));
+  const draw = await take();
   let retract = null;
   if (how === "hover") {
     // Let the draw finish: leaving mid-draw reverses the transition with a shortened duration.
     await page.waitForTimeout(600);
     await page.mouse.move(0, 0);
-    retract = await link.evaluate((el) => ({
-      ms: el.getAnimations().filter((a) => a.transitionProperty === "background-size").map((a) => a.effect.getTiming().duration),
-      from: getComputedStyle(el).backgroundPositionX.split(",")[0].trim(),
-    }));
+    retract = await take();
   }
   return { draw, retract };
 }
