@@ -373,12 +373,14 @@ code, kbd, samp, pre { font-family: var(--font-mono); font-size: 0.9em; }
   border-radius: 12px;
   font-weight: 500;
   font-size: 17px;
-  transition: background-color 0.18s ease-out, transform 0.12s ease-out;
+  /* The fill fades only on hover and focus (below), so a colour-scheme switch repaints the button at once and
+     axe never samples a half-faded fill. */
+  transition: transform 0.12s ease-out;
 }
 .btn-primary,
 .btn-primary:visited { background-color: var(--action-bg); color: var(--action-fg); }
 .btn-primary:hover,
-.btn-primary:focus-visible { background-color: var(--action-hover); background-image: none; }
+.btn-primary:focus-visible { background-color: var(--action-hover); background-image: none; transition: background-color 0.18s ease-out, transform 0.12s ease-out; }
 .btn-primary:active { transform: translateY(1px) scale(0.985); }
 #working .btn { min-height: 56px; }
 

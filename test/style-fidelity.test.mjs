@@ -20,6 +20,7 @@ after(async () => {
 const FIXTURE = `
 <section class="band" id="fx-band">
   <h1>Band</h1>
+  <a class="btn btn-primary" id="fx-btn" href="/fx/5/">Primary</a>
   <ul class="links-row"><li><a href="/fx/1/">Source code on GitHub</a></li><li><a href="/fx/2/">Engineering report</a></li></ul>
 </section>
 <section id="fx-rest">
@@ -173,4 +174,16 @@ test("identity line: the handle under the name is secondary text colour and smal
     }
     await ctx.close();
   }
+});
+
+test("primary button: a colour-scheme switch repaints the fill at once, so axe never reads a half-faded fill", async () => {
+  const { ctx, page } = await open({ colorScheme: "light" });
+  await page.emulateMedia({ colorScheme: "dark" });
+  const running = await page.evaluate(() => {
+    const btn = document.querySelector("#fx-btn");
+    getComputedStyle(btn).backgroundColor; // flushes style, which starts any transition the switch causes
+    return btn.getAnimations().map((a) => a.transitionProperty);
+  });
+  assert.deepEqual(running, [], "no transition runs on the primary button after the scheme switch");
+  await ctx.close();
 });
