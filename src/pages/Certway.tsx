@@ -1,7 +1,6 @@
 import { For, Show } from "solid-js";
 import type { Facts } from "../facts";
 import { GpuLayer } from "../components/GpuLayer";
-import { WorkerDemo } from "../components/WorkerDemo";
 import { COPY_AT_STEP_3_CERTWAY_SUMMARY } from "../content/identity";
 import {
   COPY_AT_STEP_3_CERTWAY_SECTIONS,
@@ -64,7 +63,6 @@ export function Certway(_props: { facts?: Facts }) {
           )}
         </For>
       </div>
-      <WorkerDemo />
       <GpuLayer />
     </>
   );

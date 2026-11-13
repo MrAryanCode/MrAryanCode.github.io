@@ -30,6 +30,9 @@ async function open(path, { init = [], route } = {}) {
   return { ctx, page, requests, logs };
 }
 
+// With tier 2 started, the loader probes for WebGPU (src/enhance.ts) and a headless browser without a GPU logs this
+// warning of its own for the probe. It is the browser's message, not the page's, so the log checks below set it aside.
+const logged = (logs) => logs.filter((l) => l !== "warning: No available adapters.");
 const tier1Requests = (requests) => requests.filter((r) => /\/assets\/tier1-.*\.js$/.test(r));
 const state = (page) => page.evaluate(() => {
   const button = document.querySelector("button.pause");
@@ -76,12 +79,12 @@ test("the loader starts tier 1 and creates the pause button before Message me", 
     })],
   });
   await page.waitForSelector("button.pause");
-  await page.waitForFunction(() => document.documentElement.dataset.tier);
+  await page.waitForFunction(() => document.documentElement.dataset.tier === "2");
   assert.equal(tier1Requests(requests).length, 1, `tier 1 requested: ${requests.join(" ")}`);
-  assert.deepEqual(await state(page), { label: "Pause motion", pressed: "false", motion: null, tier: "1", stored: null });
+  assert.deepEqual(await state(page), { label: "Pause motion", pressed: "false", motion: null, tier: "2", stored: null });
   const order = await page.evaluate(() => [...document.querySelectorAll("header a, header button")].map((el) => el.textContent.trim()));
   assert.deepEqual(order.slice(-2), ["Pause motion", "Message me"]);
-  assert.deepEqual(logs, []);
+  assert.deepEqual(logged(logs), []);
   // The slot holds the button's space from first paint, so the button's arrival moves nothing (DS-01).
   const [parsed, box] = await page.evaluate(() => [window.__slotAtParse, document.querySelector("button.pause").getBoundingClientRect().toJSON()]);
   assert.ok(parsed.empty, "the slot was empty at parse time");
@@ -113,8 +116,8 @@ test("Pause toggles the label and aria-pressed, aborts the signal once and write
   const { tier: _playTier, ...played } = await state(page);
   assert.deepEqual(played, { label: "Pause motion", pressed: "false", motion: null, stored: null });
   await page.waitForFunction((n) => window.__tierWrites > n, writesBefore);
-  await page.waitForFunction(() => document.documentElement.dataset.tier === "1");
-  assert.equal((await state(page)).tier, "1", "Play starts tier 1");
+  await page.waitForFunction(() => document.documentElement.dataset.tier === "2");
+  assert.equal((await state(page)).tier, "2", "Play starts tier 2");
   assert.equal(await page.evaluate(() => window.__aborts), abortsBefore + 1, "Play aborts nothing");
   await ctx.close();
 });
@@ -130,8 +133,8 @@ test("motion-paused = 1 starts no tier and creates the button as Play motion; Pl
   await page.locator("button.pause").click();
   const { tier: _playTier, ...played } = await state(page);
   assert.deepEqual(played, { label: "Pause motion", pressed: "false", motion: null, stored: null });
-  await page.waitForFunction(() => document.documentElement.dataset.tier === "1");
-  assert.equal((await state(page)).tier, "1", "Play starts tier 1");
+  await page.waitForFunction(() => document.documentElement.dataset.tier === "2");
+  assert.equal((await state(page)).tier, "2", "Play starts tier 2");
   await page.waitForTimeout(500);
   assert.equal(tier1Requests(requests).length, 1, "Play requested tier 1");
   await ctx.close();
@@ -150,9 +153,9 @@ test("blocked sessionStorage: the page reads, the button works for the page view
   await button.click();
   const { tier: _playTier, ...played } = await state(page);
   assert.deepEqual(played, { label: "Pause motion", pressed: "false", motion: null, stored: "blocked" });
-  await page.waitForFunction(() => document.documentElement.dataset.tier === "1");
-  assert.equal((await state(page)).tier, "1", "Play starts tier 1");
-  assert.deepEqual(logs, [], "no console message and no page error");
+  await page.waitForFunction(() => document.documentElement.dataset.tier === "2");
+  assert.equal((await state(page)).tier, "2", "Play starts tier 2");
+  assert.deepEqual(logged(logs), [], "no console message and no page error");
   await ctx.close();
 });
 

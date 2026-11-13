@@ -204,7 +204,7 @@ test("home: the skills panels show the shipped items, each skill joined by comma
   const items = [...(/<ul>(.*?)<\/ul>/s.exec(section)[1]).matchAll(/<li>(.*?)<\/li>/gs)].map((m) => stripTags(m[1]));
   assert.deepEqual(items, [
     "certway: Rust",
-    "This site: TypeScript, SolidJS, Vite, Node.js, Playwright, HTML and CSS, GitHub Actions, Web Animations API",
+    "This site: TypeScript, SolidJS, Vite, Node.js, Playwright, HTML and CSS, GitHub Actions, Web Animations API, Web Workers",
     "GitHub profile: Python, GitHub Actions",
   ]);
   assert.ok(section.includes("<p>Go · React, Svelte · .NET · Flutter</p>"));
@@ -273,10 +273,10 @@ test("the client JavaScript contains no token name and no Authorization header",
 
 test("worker and GPU code are separate chunks that no page references", () => {
   const files = readdirSync(dist("assets"));
-  assert.ok(files.some((n) => /^checksum\.worker-.*\.js$/.test(n)));
+  assert.ok(files.some((n) => /^input\.worker-.*\.js$/.test(n)));
   assert.ok(files.some((n) => /^layer-.*\.js$/.test(n)));
   for (const f of ["index.html", "projects/certway/index.html", "report/index.html", "404.html"]) {
-    assert.ok(!/layer-|checksum\.worker-/.test(html(f)), `${f} references a lazy chunk`);
+    assert.ok(!/layer-|input\.worker-/.test(html(f)), `${f} references a lazy chunk`);
   }
 });
 
@@ -372,7 +372,7 @@ test("the content modules equal the signed copy (identity, skills, working, cont
     skills.COPY_AT_STEP_3_SKILLS_SHIPPED.map((i) => ({ label: i.label, url: i.url, skills: i.skills.map((s) => (typeof s === "string" ? s : s.text)) })),
     [
       { label: "certway", url: `${GITHUB}certway`, skills: ["Rust"] },
-      { label: "This site", url: `${GITHUB}MrAryanCode.github.io`, skills: ["TypeScript", "SolidJS", "Vite", "Node.js", "Playwright", "HTML and CSS", "GitHub Actions", "Web Animations API"] },
+      { label: "This site", url: `${GITHUB}MrAryanCode.github.io`, skills: ["TypeScript", "SolidJS", "Vite", "Node.js", "Playwright", "HTML and CSS", "GitHub Actions", "Web Animations API", "Web Workers"] },
       { label: "GitHub profile", url: `${GITHUB}MrAryanCode`, skills: ["Python", "GitHub Actions"] },
     ],
   );

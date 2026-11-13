@@ -37,6 +37,7 @@ export const COPY_AT_STEP_3_SKILLS_SHIPPED: readonly (RepositoryItem | SiteItem)
       { text: "HTML and CSS", file: "index.html", marker: "<!--ssr-app-->" },
       { text: "GitHub Actions", file: ".github/workflows/pages.yml", marker: "actions/deploy-pages" },
       { text: "Web Animations API", file: "src/motion/spring.ts", marker: "el.animate(" },
+      { text: "Web Workers", file: "src/workers/tier2.ts", marker: "new Worker(" },
     ],
   },
   { label: "GitHub profile", url: "https://github.com/MrAryanCode/MrAryanCode", skills: ["Python", "GitHub Actions"] },
