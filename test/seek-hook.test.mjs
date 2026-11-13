@@ -66,7 +66,17 @@ async function launchWebGpu() {
     await page.goto(TEST_BASE + "/", { waitUntil: "domcontentloaded" });
     const has = await page.evaluate(async () => !!navigator.gpu && (await navigator.gpu.requestAdapter()) !== null);
     await page.close();
-    if (has) return b;
+    if (has) {
+      // CI's WebGPU adapter is SwiftShader, and from the second page on the browser destroyed each page's device within
+      // 400 ms (run 43512767925: "T3 DEVICE LOST reason=destroyed" with no destroy() call from the page, or "A valid external
+      // Instance reference no longer exists"). A page that holds one device for the whole run keeps the browser's instance
+      // alive between pages: an attempt to find out whether the last page's teardown is what ends the next page's device.
+      const anchor = await b.newPage();
+      await anchor.route("**/anchor-blank", (r) => r.fulfill({ contentType: "text/html", body: "<!doctype html><title>anchor</title>" }));
+      await anchor.goto(TEST_BASE + "/anchor-blank");
+      await anchor.evaluate(async () => { window.__anchor = await (await navigator.gpu.requestAdapter()).requestDevice(); });
+      return b;
+    }
     await b.close();
   }
   throw new Error("WebGPU: requestAdapter() resolved null twice in full Chromium with --enable-unsafe-webgpu");

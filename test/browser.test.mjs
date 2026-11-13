@@ -82,6 +82,10 @@ for (const [engine, type] of Object.entries(ENGINES)) {
       await mockGithub(page);
       await page.addInitScript(pinLevel(level));
       await page.addInitScript(trackWorkers);
+      // These cases are about tier 2. Tier 3 would add main-thread work of its own where it draws in software without being
+      // able to say so (WebKit on a runner names its renderer "Apple GPU", so D-063's decline cannot see it), and that work
+      // delays pointer events; the tier 3 cases below are the ones that load it. The loader leaves the page at tier 2.
+      await page.route(/\/assets\/tier3-[^/]*\.js$/, (r) => r.abort());
       await page.goto(BASE + "/", { waitUntil: "load" });
       if (reduce) return { ctx, page, requests, errors };
       // Tier 3 loads after tier 2 where the page has a GPU context, so "reached tier 2" is a level of 2 or more.
