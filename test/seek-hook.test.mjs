@@ -33,6 +33,14 @@ after(async () => {
 });
 
 const noGpu = () => { Object.defineProperty(Navigator.prototype, "gpu", { get: () => undefined }); };
+const logDeviceLoss = () => {
+  const request = GPUAdapter.prototype.requestDevice;
+  GPUAdapter.prototype.requestDevice = async function (...args) {
+    const device = await request.apply(this, args);
+    device.lost.then((info) => console.log(`T3 DEVICE LOST reason=${info.reason} message=${info.message}`));
+    return device;
+  };
+};
 const pinLevel = (level) => `try { sessionStorage.setItem("motion-level-pin", ${JSON.stringify(String(level))}); } catch {}`;
 
 /** Full Chromium with a WebGPU adapter: one relaunch when requestAdapter() resolves null, a failure after that. */
@@ -178,6 +186,11 @@ for (const E of ENGINES) {
       page.on("pageerror", (e) => errors.push(e.message));
       await mockGithub(page);
       if (E.removeGpu) await page.addInitScript(noGpu);
+      if (E.api === "webgpu") {
+        // A lost device ends tier 3 for the page: print why, so a CI failure of this engine says which loss it was.
+        await page.addInitScript(logDeviceLoss);
+        page.on("console", (m) => { if (m.text().startsWith("T3 DEVICE LOST")) console.log(`  ${route} ${m.text()}`); });
+      }
       await page.addInitScript(pinLevel(level));
       for (const s of init) await page.addInitScript(s);
       await page.goto(`${TEST_BASE}${route}${fx ? `?fx=${fx}` : ""}`, { waitUntil: "load" });
