@@ -118,18 +118,20 @@ for (const [engine, type] of Object.entries(ENGINES)) {
       await ctx.close();
     });
 
-    // Measured 2026-11-12: Chromium stamps a sample up to 0.2 ms after the rAF timestamp of the frame that delivers it, and
-    // Firefox up to 0.6 ms before the previous one (its event stamps are rounded to 1 ms). Both are one clock; a 2 ms
-    // allowance (a tenth of a tick) absorbs that, and a different clock (epoch time, say) would miss by far more.
-    test("A-5 (f) a pointer sample's timeStamp lies between the surrounding rAF timestamps, to 2 ms", async () => {
+    // Measured: the engines do not stamp a sample strictly between the two rAF timestamps around its delivery. Chromium
+    // stamps it up to 0.2 ms after the frame's rAF timestamp, Firefox up to 0.6 ms before the previous one and, on the CI
+    // runner, 2 ms after the next one. What A-5 relies on is one clock, so the bound is one tick (16.7 ms) either side: a
+    // different clock (epoch time, or seconds) misses by far more. A sample that arrives before the first frame is skipped.
+    test("A-5 (f) a pointer sample's timeStamp lies between the surrounding rAF timestamps, to one tick", async () => {
       const { ctx, page } = await openTier2();
       await page.evaluate(() => {
         const rafs = { last: 0, pending: [], checked: 0, bad: [] };
         window.__stamps = rafs;
         const tick = (ts) => {
           for (const p of rafs.pending) {
+            if (p.before === 0) continue;
             rafs.checked += 1;
-            if (!(p.before - 2 <= p.stamp && p.stamp <= ts + 2)) rafs.bad.push({ before: p.before, stamp: p.stamp, after: ts });
+            if (!(p.before - 1000 / 60 <= p.stamp && p.stamp <= ts + 1000 / 60)) rafs.bad.push({ before: p.before, stamp: p.stamp, after: ts });
           }
           rafs.pending = [];
           rafs.last = ts;
