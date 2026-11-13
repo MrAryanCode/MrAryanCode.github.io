@@ -1,6 +1,6 @@
 // The cross-document transition (T-032; D-041, design.md DV-02.5): the card-to-page morph from home to the certway
 // and "This site" pages, the 0.25 s crossfade on every other same-origin navigation, and an instant cut under reduced
-// motion and while paused. The head script and style live inline in index.html.
+// motion and while paused. The head script lives inline in index.html and the style in src/style.css (D-060).
 // Cases (a) to (f) read the transition's state and run in Chromium only; Firefox and WebKit run case (g), so each case is
 // registered only for the browsers it runs in and none skips (CR10-B2).
 import assert from "node:assert/strict";

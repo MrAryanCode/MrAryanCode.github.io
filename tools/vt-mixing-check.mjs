@@ -9,13 +9,30 @@
 // UNGATED=1 starts the restore-time transition in part 2 without waiting for window.vtSettled() (control run: must fail).
 import http from "node:http";
 import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 
-const built = fs.readFileSync(process.env.HTML || new URL("../dist/index.html", import.meta.url), "utf8");
+const htmlFile = process.env.HTML || fileURLToPath(new URL("../dist/index.html", import.meta.url));
+const built = fs.readFileSync(htmlFile, "utf8");
 const scripts = [...built.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]).filter((s) => s.includes("vtSettled"));
-const styles = [...built.matchAll(/<style>([\s\S]*?)<\/style>/g)].map((m) => m[1]).filter((s) => s.includes("@view-transition"));
-if (scripts.length !== 1 || styles.length !== 1) throw new Error(`expected one head script and one view-transition style in the built page, found ${scripts.length} and ${styles.length}`);
-const css = styles[0];
+// The opt-in and the ::view-transition-* rules live in the site stylesheet (D-060), which the built page links. The check
+// keeps only those top-level rules (the rest of the sheet carries font URLs and layout this check does not serve).
+function topLevelRules(text) {
+  const rules = [];
+  let depth = 0, start = 0;
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === "{") depth++;
+    else if (text[i] === "}" && --depth === 0) { rules.push(text.slice(start, i + 1)); start = i + 1; }
+    else if (text[i] === ";" && depth === 0) start = i + 1;
+  }
+  return rules;
+}
+const sheets = [...built.matchAll(/<link[^>]*rel="stylesheet"[^>]*href="([^"]+)"/g)].map((m) => m[1]);
+const sheetText = sheets.map((h) => fs.readFileSync(path.join(path.dirname(htmlFile), h), "utf8")).filter((s) => s.includes("@view-transition"));
+if (scripts.length !== 1 || sheetText.length !== 1) throw new Error(`expected one head script and one stylesheet with the view-transition rules in the built page, found ${scripts.length} and ${sheetText.length}`);
+const css = topLevelRules(sheetText[0]).filter((r) => r.includes("view-transition") || r.includes("vt-lift")).join("\n");
+if (!css.includes("@view-transition{navigation:auto}") || !css.includes("::view-transition-group(case-card)")) throw new Error("the built stylesheet lost the view-transition rules");
 let js = scripts[0];
 if (process.env.NAIVE) js = js.replace("vt.finished.then(done, done);", "").replaceAll("clearNames();", "");
 const head = `<script>${js}</script>`;

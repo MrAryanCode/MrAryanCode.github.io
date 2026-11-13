@@ -604,5 +604,24 @@ table.perf th:not(:first-child) { text-align: right; }
   .not-found .role { max-width: 22em; }
 }
 
+/* ---------- Cross-document view transitions (D-041, D-060): the opt-in and the morph timing ---------- */
+@view-transition { navigation: auto; }
+@media (prefers-reduced-motion: reduce) {
+  @view-transition { navigation: none; }
+}
+::view-transition-group(case-card) {
+  animation-duration: 760ms;
+  animation-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+@keyframes vt-lift {
+  0% { transform: scale(1); }
+  18% { transform: scale(1.02); }
+  50% { transform: scale(1.02); }
+  100% { transform: scale(1); }
+}
+::view-transition-image-pair(case-card) {
+  animation: vt-lift 760ms cubic-bezier(0.2, 0, 0, 1) both;
+}
+
 /* ---------- Skeleton probes (removed by T-017 and T-018 when they replace them) ---------- */
 canvas { display: block; background: var(--text-2); opacity: 0.2; }

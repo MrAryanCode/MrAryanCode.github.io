@@ -2,25 +2,6 @@
 <html lang="en">
 <head>
 <!--ssr-head-->
-<style>
-@view-transition { navigation: auto; }
-@media (prefers-reduced-motion: reduce) {
-  @view-transition { navigation: none; }
-}
-::view-transition-group(case-card) {
-  animation-duration: 760ms;
-  animation-timing-function: cubic-bezier(0.2, 0, 0, 1);
-}
-@keyframes vt-lift {
-  0% { transform: scale(1); }
-  18% { transform: scale(1.02); }
-  50% { transform: scale(1.02); }
-  100% { transform: scale(1); }
-}
-::view-transition-image-pair(case-card) {
-  animation: vt-lift 760ms cubic-bezier(0.2, 0, 0, 1) both;
-}
-</style>
 <script>
 (function () {
   var NAME = 'case-card';
