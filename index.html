@@ -2,6 +2,108 @@
 <html lang="en">
 <head>
 <!--ssr-head-->
+<style>
+@view-transition { navigation: auto; }
+@media (prefers-reduced-motion: reduce) {
+  @view-transition { navigation: none; }
+}
+::view-transition-group(case-card) {
+  animation-duration: 760ms;
+  animation-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+@keyframes vt-lift {
+  0% { transform: scale(1); }
+  18% { transform: scale(1.02); }
+  50% { transform: scale(1.02); }
+  100% { transform: scale(1); }
+}
+::view-transition-image-pair(case-card) {
+  animation: vt-lift 760ms cubic-bezier(0.2, 0, 0, 1) both;
+}
+</style>
+<script>
+(function () {
+  var NAME = 'case-card';
+  // Home to these two pages morphs the card that leads there into the page's header band (D-041).
+  // Every other navigation keeps the browser's 0.25 s crossfade and carries no name.
+  var TARGET = /^\/(?:projects\/certway|report)\/$/;
+
+  // Gate for same-document transitions: window.vtSettled() resolves when no
+  // cross-document transition is pending.
+  var settled = false, openGate, gate;
+  function arm() { settled = false; gate = new Promise(function (r) { openGate = r; }); }
+  function open() { settled = true; openGate(); }
+  arm();
+  if (!('onpagereveal' in window)) open();
+  window.vtSettled = function () { return gate; };
+
+  function paused() {
+    try { return sessionStorage.getItem('motion-paused') === '1'; } catch (e) { return false; }
+  }
+  function pathOf(url) {
+    try {
+      var p = new URL(url, location.href).pathname.replace(/index\.html$/, '');
+      return p.charAt(p.length - 1) === '/' ? p : p + '/';
+    } catch (e) { return ''; }
+  }
+  function isPair(from, to) { return from === '/' && TARGET.test(to); }
+  function activationFrom() {
+    var a = window.navigation && navigation.activation;
+    if (a && a.from) return pathOf(a.from.url);
+    return document.referrer ? pathOf(document.referrer) : '';
+  }
+  function clearNames() {
+    var els = document.querySelectorAll('.panel-card, .band');
+    for (var i = 0; i < els.length; i++) els[i].style.viewTransitionName = '';
+  }
+  function cardFor(path) {
+    var cards = document.querySelectorAll('.panel-card');
+    for (var i = 0; i < cards.length; i++) {
+      var links = cards[i].querySelectorAll('a[href]');
+      for (var j = 0; j < links.length; j++) if (pathOf(links[j].href) === path) return cards[i];
+    }
+    return null;
+  }
+  function name(el, vt, after) {
+    if (el) el.style.viewTransitionName = NAME;
+    function done() {
+      if (el) el.style.viewTransitionName = '';
+      if (after) after();
+    }
+    vt.finished.then(done, done);
+  }
+
+  addEventListener('pageswap', function (e) {
+    var vt = e.viewTransition;
+    if (!vt) return;
+    vt.ready.catch(function () {});
+    if (paused()) { vt.skipTransition(); return; }
+    var from = pathOf(location.href);
+    var to = e.activation && e.activation.entry ? pathOf(e.activation.entry.url) : '';
+    clearNames();
+    if (isPair(from, to)) name(cardFor(to), vt);
+  });
+
+  addEventListener('pagereveal', function (e) {
+    if (settled) arm();
+    var vt = e.viewTransition;
+    if (!vt) { open(); return; }
+    vt.ready.catch(function () {});
+    if (paused()) {
+      vt.finished.then(open, open);
+      vt.skipTransition();
+      return;
+    }
+    clearNames();
+    if (isPair(activationFrom(), pathOf(location.href))) name(document.querySelector('.band'), vt, open);
+    else vt.finished.then(open, open);
+  });
+  // A restore from the back-forward cache fires pageshow before pagereveal.
+  addEventListener('pageshow', function (e) {
+    if (e.persisted && settled && 'onpagereveal' in window) arm();
+  });
+})();
+</script>
 </head>
 <body>
 <div id="root"><!--ssr-app--></div>
