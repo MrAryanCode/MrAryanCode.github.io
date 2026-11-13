@@ -124,6 +124,11 @@ jobs:
             .lighthouseci/
           if-no-files-found: warn
 
+      # The deploy folder must carry no test-only seek hook (vite-test-only-module). This runs after the last
+      # write to dist/ and right before the upload, so it judges exactly what is deployed.
+      - name: Check dist/ for the test-only seek hook
+        run: npm run check:deploy
+
       - name: Upload the Pages artifact
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:

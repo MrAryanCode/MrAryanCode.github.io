@@ -1,0 +1,15 @@
+{
+  "absent": [
+    { "text": "__T3_SEEK__" },
+    { "text": "seek-hook" },
+    { "text": "T3_FX_OVERRIDE" },
+    { "text": "__SEEK_HOOK__" },
+    { "regex": "[\"'`]fx[\"'`]|(^|[^-.A-Za-z0-9_])fx=" }
+  ],
+  "present": [
+    { "text": "__T3_SEEK__" },
+    { "text": "seek-hook" },
+    { "text": "T3_FX_OVERRIDE" },
+    { "regex": "[\"'`]fx[\"'`]|(^|[^-.A-Za-z0-9_])fx=" }
+  ]
+}

@@ -9,7 +9,11 @@ export const root = dirname(dirname(fileURLToPath(import.meta.url)));
 export const API_PORT = 4611;
 export const SITE_PORT = 4612;
 export const BASE = `http://127.0.0.1:${SITE_PORT}`;
+// The test-hook variant (scripts/build.mjs --mode test) is served on its own port, so it never shadows dist/.
+export const TEST_SITE_PORT = 4613;
+export const TEST_BASE = `http://127.0.0.1:${TEST_SITE_PORT}`;
 export const dist = (...p) => join(root, "dist", ...p);
+export const distTest = (...p) => join(root, "dist-test", ...p);
 export const html = (file) => readFileSync(dist(file), "utf8");
 
 /** A full 40-character commit, for the builds that carry a build stamp. */
@@ -29,18 +33,23 @@ const start = (script, args) => {
  * `githubSha` is set or deleted in the build's environment explicitly, because GITHUB_SHA is always set on
  * Actions: a string builds with a build stamp, null (the default) builds like a local build, with none.
  * `fixturesDir` is the directory the fixture API serves; it defaults to test/fixtures.
+ * `mode: "test"` runs scripts/build.mjs --mode test (the seek-hook variant, dist-test/) and serves dist-test/ on
+ * TEST_SITE_PORT; the default "production" builds and serves dist/ as before. Returns the base URL of the site it serves.
  */
-export async function buildAndServe({ development = false, githubSha = null, fixturesDir = join(root, "test", "fixtures") } = {}) {
+export async function buildAndServe({ development = false, githubSha = null, fixturesDir = join(root, "test", "fixtures"), mode = "production" } = {}) {
+  const isTest = mode === "test";
+  const out = isTest ? distTest : dist, port = isTest ? TEST_SITE_PORT : SITE_PORT;
   start("fixture-api.mjs", [fixturesDir, String(API_PORT)]);
   await sleep(500);
   const env = { ...process.env, SITE_GITHUB_API_URL: `http://127.0.0.1:${API_PORT}`, NODE_ENV: development ? "development" : "production" };
   if (githubSha === null) delete env.GITHUB_SHA;
   else env.GITHUB_SHA = githubSha;
-  const r = spawnSync(process.execPath, [join(root, "scripts", "build.mjs")], { cwd: root, env, encoding: "utf8" });
+  const r = spawnSync(process.execPath, [join(root, "scripts", "build.mjs"), ...(isTest ? ["--mode", "test"] : [])], { cwd: root, env, encoding: "utf8" });
   if (r.status !== 0) throw new Error(`build failed (${r.status}): ${r.stdout}\n${r.stderr}`);
-  if (!existsSync(dist("index.html"))) throw new Error("dist/index.html missing after a successful build");
-  start("pages-server.mjs", [dist(), String(SITE_PORT)]);
+  if (!existsSync(out("index.html"))) throw new Error(`${isTest ? "dist-test" : "dist"}/index.html missing after a successful build`);
+  start("pages-server.mjs", [out(), String(port)]);
   await sleep(500);
+  return isTest ? TEST_BASE : BASE;
 }
 
 /** Stops the helper processes and waits until they have exited, so a later buildAndServe can reuse the ports. */

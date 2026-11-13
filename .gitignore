@@ -3,3 +3,5 @@ dist
 .stage
 reports
 .lighthouseci
+dist-test
+.stage-test
