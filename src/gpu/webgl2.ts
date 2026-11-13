@@ -212,8 +212,9 @@ void main() {
 }`;
 
 /** Creates the backend on `canvas`, or returns null when the canvas gives no WebGL2 context. `onLost` and `onRestored`
- *  report the context events; the caller then resets the step-down monitor (A-3) and decides about the canvas. */
-export function createWebGl2(canvas: HTMLCanvasElement, onLost: () => void, onRestored: () => void): Backend | null {
+ *  report the context events; the caller then resets the step-down monitor (A-3) and decides about the canvas.
+ *  Also returns null (D-063) when the unmasked renderer string says SwiftShader, unless `allowSoftware` (test build only). */
+export function createWebGl2(canvas: HTMLCanvasElement, onLost: () => void, onRestored: () => void, allowSoftware = false): Backend | null {
   const gl = canvas.getContext("webgl2", {
     alpha: false,
     antialias: false,
@@ -223,6 +224,12 @@ export function createWebGl2(canvas: HTMLCanvasElement, onLost: () => void, onRe
     preserveDrawingBuffer: false,
   });
   if (!gl) return null;
+  const dbg = gl.getExtension("WEBGL_debug_renderer_info");
+  const name = dbg ? String(gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL)) : "unknown";
+  if (!allowSoftware && name.includes("SwiftShader")) {
+    gl.getExtension("WEBGL_lose_context")?.loseContext();
+    return null;
+  }
   let lost = false;
   let cw = 1;
   let ch = 1;
@@ -232,8 +239,6 @@ export function createWebGl2(canvas: HTMLCanvasElement, onLost: () => void, onRe
   let vao: WebGLVertexArrayObject | null = null;
   let maskTex: WebGLTexture | null = null;
   const lose = gl.getExtension("WEBGL_lose_context");
-  const dbg = gl.getExtension("WEBGL_debug_renderer_info");
-  const name = dbg ? String(gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL)) : "unknown";
 
   // A context can die while it is being set up: compile or link then fails with an empty log before isContextLost()
   // turns true. That counts as a loss; the restore event rebuilds everything.

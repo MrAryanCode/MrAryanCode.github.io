@@ -3,6 +3,7 @@
     { "text": "__T3_SEEK__" },
     { "text": "seek-hook" },
     { "text": "T3_FX_OVERRIDE" },
+    { "text": "T3_ALLOW_SOFTWARE" },
     { "text": "__SEEK_HOOK__" },
     { "regex": "[\"'`]fx[\"'`]|(^|[^-.A-Za-z0-9_])fx=" }
   ],
@@ -10,6 +11,7 @@
     { "text": "__T3_SEEK__" },
     { "text": "seek-hook" },
     { "text": "T3_FX_OVERRIDE" },
+    { "text": "T3_ALLOW_SOFTWARE" },
     { "regex": "[\"'`]fx[\"'`]|(^|[^-.A-Za-z0-9_])fx=" }
   ]
 }

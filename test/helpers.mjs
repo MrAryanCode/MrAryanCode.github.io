@@ -77,3 +77,24 @@ export const launchFullChromium = ({ webgpu = false } = {}) =>
     executablePath: process.env.CHROMIUM_FULL_PATH || undefined,
     args: webgpu ? ["--enable-unsafe-webgpu"] : [],
   });
+
+let softwareSite = null;
+/**
+ * Where a test that needs tier 3 drawing opens its pages. Tier 3 declines on a software renderer (D-063: the unmasked WebGL2
+ * renderer says SwiftShader), so on CI's runner the production build stays on tier 2. There this serves the test build
+ * (dist-test/, built once per process) and returns the script that switches the decline off in it; on a GPU it returns the
+ * production site and an empty script. `init` must be added to every context the test opens. Returns { base, init, software }.
+ */
+export async function tier3Site(browser) {
+  const page = await browser.newPage();
+  const renderer = await page.evaluate(() => {
+    const gl = document.createElement("canvas").getContext("webgl2");
+    const info = gl?.getExtension("WEBGL_debug_renderer_info");
+    return info ? String(gl.getParameter(info.UNMASKED_RENDERER_WEBGL)) : "";
+  });
+  await page.close();
+  if (!renderer.includes("SwiftShader")) return { base: BASE, init: "", software: false };
+  softwareSite ??= buildAndServe({ mode: "test" });
+  await softwareSite;
+  return { base: TEST_BASE, init: "globalThis.T3_ALLOW_SOFTWARE = true;", software: true };
+}

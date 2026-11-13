@@ -234,7 +234,17 @@ function rasterMask(m: NonNullable<Measured["maskCssRect"]>, cells: MaskCells, d
 
 // ---- Backends ----
 
+/** A software adapter: the one the browser itself calls a fallback, or SwiftShader. The reading is `adapter.info`
+ *  (`adapter.isFallbackAdapter` is undefined on the adapter object). No GPU list is kept: only the software cases decline. */
+function softwareAdapter(adapter: unknown): boolean {
+  const info = (adapter as { info?: { isFallbackAdapter?: boolean; architecture?: string } }).info;
+  return info?.isFallbackAdapter === true || info?.architecture === "swiftshader";
+}
+
 async function createBackend(wrap: HTMLElement, onLost: () => void, onRestored: () => void): Promise<{ backend: Backend; canvas: HTMLCanvasElement } | null> {
+  // D-063: tier 3 declines on a software renderer and the page stays on tier 2. Only the seek-hook build can switch the
+  // decline off (CI's runner has no GPU); the deploy build folds this to false, so the switch is not in dist/.
+  const allowSoftware = __SEEK_HOOK__ && (globalThis as { T3_ALLOW_SOFTWARE?: unknown }).T3_ALLOW_SOFTWARE === true;
   const fresh = (): HTMLCanvasElement => {
     const c = document.createElement("canvas");
     c.setAttribute("aria-hidden", "true");
@@ -248,7 +258,7 @@ async function createBackend(wrap: HTMLElement, onLost: () => void, onRestored: 
     wrap.append(canvas);
     try {
       const adapter = await gpu.requestAdapter();
-      if (adapter) {
+      if (adapter && (allowSoftware || !softwareAdapter(adapter))) {
         const { createWebGpu } = await import("./layer.ts"); // its own chunk, loaded only when an adapter exists
         const backend = await createWebGpu(canvas, adapter, onLost);
         if (backend) return { backend, canvas };
@@ -261,7 +271,7 @@ async function createBackend(wrap: HTMLElement, onLost: () => void, onRestored: 
   const canvas = fresh();
   wrap.append(canvas);
   try {
-    const backend = createWebGl2(canvas, onLost, onRestored);
+    const backend = createWebGl2(canvas, onLost, onRestored, allowSoftware);
     if (backend) return { backend, canvas };
   } catch {
     // A context that is not a real one (a stub) ends here: tier 3 declines.

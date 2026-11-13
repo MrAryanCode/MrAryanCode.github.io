@@ -3,12 +3,16 @@
 import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 import { chromium } from "playwright";
-import { BASE, buildAndServe, stopAll } from "./helpers.mjs";
+import { BASE, buildAndServe, stopAll, tier3Site } from "./helpers.mjs";
 
 let browser;
+// Where the browser renders WebGL2 in software tier 3 declines (D-063); the cases that expect tier 3 then open the test build
+// with the decline switched off (tier3Site). On a GPU this is the production site.
+let site;
 before(async () => {
   await buildAndServe();
   browser = await chromium.launch({ headless: true, executablePath: process.env.CHROMIUM_PATH || undefined });
+  site = await tier3Site(browser);
 });
 after(async () => {
   await browser?.close();
@@ -17,6 +21,7 @@ after(async () => {
 
 async function open(path, { init = [], route } = {}) {
   const ctx = await browser.newContext();
+  if (site.init) await ctx.addInitScript(site.init);
   const requests = [];
   const logs = [];
   ctx.on("request", (r) => requests.push(new URL(r.url()).pathname));
@@ -25,7 +30,7 @@ async function open(path, { init = [], route } = {}) {
   page.on("pageerror", (e) => logs.push(`pageerror: ${e.message}`));
   for (const s of init) await page.addInitScript(s);
   if (route) await route(page);
-  await page.goto(BASE + path, { waitUntil: "load" });
+  await page.goto(site.base + path, { waitUntil: "load" });
   await page.waitForFunction(() => window.__hydrated === true);
   return { ctx, page, requests, logs };
 }

@@ -4,7 +4,7 @@ import { after, before, describe, test } from "node:test";
 import { chromium, firefox, webkit } from "playwright";
 import sharp from "sharp";
 import { mockGithub } from "../tests/acceptance/github-mock.cjs";
-import { BASE, buildAndServe, stopAll } from "./helpers.mjs";
+import { BASE, buildAndServe, stopAll, tier3Site } from "./helpers.mjs";
 import { assertLayout } from "./layout-check.mjs";
 
 let browser;
@@ -284,6 +284,7 @@ for (const [engine, type] of Object.entries(ENGINES)) {
   describe(`tier 3 in ${engine}`, () => {
     let own;
     let skipReason = null;
+    let site = { base: BASE, init: "" };
     before(async () => {
       own = await type.launch({ headless: true, executablePath: engine === "chromium" ? process.env.CHROMIUM_PATH || undefined : undefined });
       // Firefox on a runner has no WebGL context. The loader starts tier 3 only where an OffscreenCanvas gives WebGL2, so a
@@ -296,6 +297,9 @@ for (const [engine, type] of Object.entries(ENGINES)) {
       await page.close();
       if (engine === "firefox" && !probe.gl) skipReason = "no WebGL2 context: firefox";
       else if (engine === "webkit" && !probe.offscreen) skipReason = "no OffscreenCanvas WebGL2: webkit";
+      // Tier 3 declines where WebGL2 renders in software (D-063; CI's runner): these cases then open the test build with the
+      // decline switched off. The decline itself is checked on the production build, in the describe below.
+      else site = await tier3Site(own);
     });
     after(async () => { await own?.close(); });
 
@@ -308,6 +312,7 @@ for (const [engine, type] of Object.entries(ENGINES)) {
     /** `pin` is the motion-level-pin value (undefined: none). `field()` waits for tier 3 and explains a failure. */
     async function openField({ pin, route = "/", reduce = false } = {}) {
       const ctx = await own.newContext({ viewport: { width: 1366, height: 768 }, reducedMotion: reduce ? "reduce" : "no-preference" });
+      if (site.init) await ctx.addInitScript(site.init);
       const page = await ctx.newPage();
       const errors = [];
       const requests = [];
@@ -316,7 +321,7 @@ for (const [engine, type] of Object.entries(ENGINES)) {
       await mockGithub(page);
       if (pin !== undefined) await page.addInitScript(pinLevel(pin));
       await page.addInitScript(trackSteps);
-      await page.goto(BASE + route, { waitUntil: "load" });
+      await page.goto(site.base + route, { waitUntil: "load" });
       const field = async () => {
         try {
           await page.waitForFunction(() => document.documentElement.dataset.tier === "3", undefined, { timeout: 25000 });
@@ -347,7 +352,7 @@ for (const [engine, type] of Object.entries(ENGINES)) {
       assert.notEqual(await page.evaluate(() => getComputedStyle(document.body, "::before").display), "none", "the still texture is shown");
       assert.equal(await page.evaluate(() => window.__steps.at(-1).level), 7);
       // The same tab, a page that would play a formation: no canvas, no field flag, no second intro.
-      await page.goto(BASE + "/nope/x", { waitUntil: "load" });
+      await page.goto(site.base + "/nope/x", { waitUntil: "load" });
       await page.waitForFunction(() => Number(document.documentElement.dataset.tier) >= 2);
       await page.waitForTimeout(1500);
       assert.equal(await page.evaluate((c) => document.querySelector(c), CANVAS), null, "no canvas on the next navigation");
@@ -513,6 +518,84 @@ for (const [engine, type] of Object.entries(ENGINES)) {
     });
   });
 }
+
+// ---- Tier 3 declines on a software renderer (D-063), on the production build ----
+// A browser whose WebGL2 renders in SwiftShader (CI's runner, or the headless shell with --disable-gpu) passes the loader's
+// OffscreenCanvas gate, so tier 3 loads, finds the software renderer and leaves the page on tier 2. The test fails before it
+// can pass for another reason: it needs a launch whose OffscreenCanvas WebGL2 names SwiftShader.
+describe("tier 3 declines on a software renderer", () => {
+  let soft = null;
+  before(async () => {
+    for (const args of [[], ["--disable-gpu"]]) {
+      const b = await chromium.launch({ headless: true, executablePath: process.env.CHROMIUM_PATH || undefined, args });
+      const page = await b.newPage();
+      const renderer = await page.evaluate(() => {
+        const gl = typeof OffscreenCanvas === "undefined" ? null : new OffscreenCanvas(1, 1).getContext("webgl2");
+        const info = gl?.getExtension("WEBGL_debug_renderer_info");
+        return info ? String(gl.getParameter(info.UNMASKED_RENDERER_WEBGL)) : "";
+      });
+      await page.close();
+      if (renderer.includes("SwiftShader")) {
+        soft = { browser: b, renderer };
+        return;
+      }
+      await b.close();
+    }
+  });
+  after(async () => { await soft?.browser.close(); });
+
+  test("the production build stays on tier 2 and makes no canvas", async () => {
+    assert.ok(soft, "no launch of this Chromium gave an OffscreenCanvas WebGL2 context whose renderer says SwiftShader");
+    const ctx = await soft.browser.newContext({ viewport: { width: 1366, height: 768 } });
+    const page = await ctx.newPage();
+    const errors = [];
+    const requests = [];
+    page.on("pageerror", (e) => errors.push(e.message));
+    page.on("request", (r) => requests.push(new URL(r.url()).pathname));
+    await mockGithub(page);
+    await page.addInitScript(pinLevel(0));
+    await page.goto(BASE + "/", { waitUntil: "load" });
+    await page.waitForFunction(() => Number(document.documentElement.dataset.tier) >= 2);
+    // Tier 3 must have been loaded and run its start: a page that never got that far proves nothing about the decline.
+    for (let i = 0; i < 100 && !requests.some((r) => /\/assets\/tier3-.*\.js$/.test(r)); i++) await page.waitForTimeout(100);
+    assert.ok(requests.some((r) => /\/assets\/tier3-.*\.js$/.test(r)), `the tier 3 module was requested: ${requests.join(" ")}`);
+    await page.waitForTimeout(3000);
+    const state = await page.evaluate((c) => ({
+      tier: document.documentElement.dataset.tier,
+      field: document.documentElement.dataset.field ?? null,
+      canvases: document.querySelectorAll(c).length,
+    }), CANVAS);
+    assert.deepEqual(state, { tier: "2", field: null, canvases: 0 }, `on ${soft.renderer}`);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  });
+
+  // A WebGPU adapter that is software (adapter.info.isFallbackAdapter, or architecture "swiftshader") never loads the WebGPU
+  // layer chunk; the control adapter, a hardware one, does, so the case can see the request it is asserting the absence of.
+  for (const [name, info, chunk] of [
+    ["isFallbackAdapter", { vendor: "google", architecture: "other", isFallbackAdapter: true }, false],
+    ["architecture swiftshader", { vendor: "google", architecture: "swiftshader", isFallbackAdapter: false }, false],
+    ["a hardware adapter (control)", { vendor: "nvidia", architecture: "ampere", isFallbackAdapter: false }, true],
+  ]) {
+    test(`a WebGPU adapter with ${name} ${chunk ? "loads" : "does not load"} the WebGPU layer`, async () => {
+      assert.ok(soft, "no launch of this Chromium gave an OffscreenCanvas WebGL2 context whose renderer says SwiftShader");
+      const ctx = await soft.browser.newContext();
+      const page = await ctx.newPage();
+      const requests = [];
+      page.on("request", (r) => requests.push(new URL(r.url()).pathname));
+      await mockGithub(page);
+      await page.addInitScript((i) => {
+        Object.defineProperty(navigator, "gpu", { value: { requestAdapter: async () => ({ info: i, requestDevice: async () => ({}) }) }, configurable: true });
+      }, info);
+      await page.goto(BASE + "/", { waitUntil: "load" });
+      await page.waitForFunction(() => Number(document.documentElement.dataset.tier) >= 2);
+      for (let i = 0; i < 100 && !requests.some((r) => /\/assets\/tier3-.*\.js$/.test(r)); i++) await page.waitForTimeout(100);
+      await page.waitForTimeout(chunk ? 2000 : 3000);
+      assert.equal(requests.some((r) => /\/assets\/layer-.*\.js$/.test(r)), chunk, `requests: ${requests.join(" ")}`);
+      await ctx.close();
+    });
+  }
+});
 
 // Underline draw (D-051, P-12): the resting underline draws to full width in 0.42 s on hover or focus and retracts in 0.42 s;
 // it is instant under reduced motion and under html[data-motion="paused"]; and the step-down level does not change it.

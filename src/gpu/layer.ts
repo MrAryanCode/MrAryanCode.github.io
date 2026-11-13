@@ -246,7 +246,7 @@ export async function createWebGpu(canvas: HTMLCanvasElement, adapter: Dyn, onLo
   });
   const ubo = device.createBuffer({ size: UNIFORM_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
   const info: Dyn = adapter.info ?? {};
-  const name = (`${info.vendor ?? ""} ${info.architecture ?? ""}`.trim() || "unknown") + (adapter.isFallbackAdapter ? " (fallback)" : "");
+  const name = (`${info.vendor ?? ""} ${info.architecture ?? ""}`.trim() || "unknown") + (info.isFallbackAdapter ? " (fallback)" : "");
   const maxDim: number = device.limits?.maxTextureDimension2D ?? 8192;
   let destroyed = false;
   let lost = false;

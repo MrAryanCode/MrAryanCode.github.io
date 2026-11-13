@@ -38,8 +38,23 @@ const logDeviceLoss = () => {
   GPUAdapter.prototype.requestDevice = async function (...args) {
     const device = await request.apply(this, args);
     device.lost.then((info) => console.log(`T3 DEVICE LOST reason=${info.reason} message=${info.message}`));
+    const destroy = device.destroy.bind(device);
+    device.destroy = () => {
+      console.log(`T3 DEVICE DESTROY called from ${new Error().stack.split("\n").slice(2, 7).map((l) => l.trim()).join(" | ")}`);
+      return destroy();
+    };
     return device;
   };
+};
+// Tier 3 declines on a software renderer (D-063); CI's runner has only SwiftShader, so every context of the test build switches that off.
+const allowSoftwareRenderer = (browser) => {
+  const make = browser.newContext.bind(browser);
+  browser.newContext = async (...args) => {
+    const ctx = await make(...args);
+    await ctx.addInitScript(() => { globalThis.T3_ALLOW_SOFTWARE = true; });
+    return ctx;
+  };
+  return browser;
 };
 const pinLevel = (level) => `try { sessionStorage.setItem("motion-level-pin", ${JSON.stringify(String(level))}); } catch {}`;
 
@@ -165,7 +180,7 @@ for (const E of ENGINES) {
     let browser;
     let skipReason = null;
     before(async () => {
-      browser = await E.launch();
+      browser = allowSoftwareRenderer(await E.launch());
       skipReason = await gpuSkipReason(E, browser);
     });
     after(async () => { await browser?.close(); });
@@ -189,7 +204,7 @@ for (const E of ENGINES) {
       if (E.api === "webgpu") {
         // A lost device ends tier 3 for the page: print why, so a CI failure of this engine says which loss it was.
         await page.addInitScript(logDeviceLoss);
-        page.on("console", (m) => { if (m.text().startsWith("T3 DEVICE LOST")) console.log(`  ${route} ${m.text()}`); });
+        page.on("console", (m) => { if (m.text().startsWith("T3 DEVICE")) console.log(`  ${route} ${m.text()}`); });
       }
       await page.addInitScript(pinLevel(level));
       for (const s of init) await page.addInitScript(s);
@@ -583,7 +598,7 @@ for (const E of ENGINES.filter((e) => e.name !== "chromium webgpu")) {
     let browser;
     before(async () => {
       if (process.platform === "linux") return; // the platform check comes first, so a Linux run launches nothing
-      browser = E.name === "chromium webgl2" ? await launchFullChromium({ webgpu: false }) : await E.launch();
+      browser = allowSoftwareRenderer(E.name === "chromium webgl2" ? await launchFullChromium({ webgpu: false }) : await E.launch());
     });
     after(async () => { await browser?.close(); });
 
