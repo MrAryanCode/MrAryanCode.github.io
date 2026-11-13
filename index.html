@@ -4,6 +4,12 @@
 <!--ssr-head-->
 <script>
 (function () {
+  // The opt-in is inserted here, synchronously while the head is parsed, so that it is in force before the first
+  // render of every page (D-061). The ::view-transition-* rules live in src/style.css.
+  var optIn = document.createElement('style');
+  optIn.textContent = '@view-transition { navigation: auto; } @media (prefers-reduced-motion: reduce) { @view-transition { navigation: none; } }';
+  document.head.appendChild(optIn);
+
   var NAME = 'case-card';
   // Home to these two pages morphs the card that leads there into the page's header band (D-041).
   // Every other navigation keeps the browser's 0.25 s crossfade and carries no name.

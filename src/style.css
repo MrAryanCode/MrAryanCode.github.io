@@ -604,11 +604,7 @@ table.perf th:not(:first-child) { text-align: right; }
   .not-found .role { max-width: 22em; }
 }
 
-/* ---------- Cross-document view transitions (D-041, D-060): the opt-in and the morph timing ---------- */
-@view-transition { navigation: auto; }
-@media (prefers-reduced-motion: reduce) {
-  @view-transition { navigation: none; }
-}
+/* ---------- Cross-document view transitions (D-041, D-061): the morph timing (the opt-in is inserted by the head script in index.html) ---------- */
 ::view-transition-group(case-card) {
   animation-duration: 760ms;
   animation-timing-function: cubic-bezier(0.2, 0, 0, 1);

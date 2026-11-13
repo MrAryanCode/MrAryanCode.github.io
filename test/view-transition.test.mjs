@@ -1,17 +1,22 @@
 // The cross-document transition (T-032; D-041, design.md DV-02.5): the card-to-page morph from home to the certway
 // and "This site" pages, the 0.25 s crossfade on every other same-origin navigation, and an instant cut under reduced
-// motion and while paused. The head script lives inline in index.html and the style in src/style.css (D-060).
+// motion and while paused. The head script lives inline in index.html and inserts the opt-in as a <style> while the head
+// is parsed (D-061); the ::view-transition-* rules are in src/style.css.
 // Cases (a) to (f) read the transition's state and run in Chromium only; Firefox and WebKit run case (g), so each case is
 // registered only for the browsers it runs in and none skips (CR10-B2).
+// D-061 asks for proof that the script-inserted opt-in is reliable: the Back case and case (d) are registered REPEATS times
+// more in Chromium, named "[repeat n/REPEATS]", and all of them must pass within one run.
 import assert from "node:assert/strict";
 import { after, before, describe, test } from "node:test";
 import { chromium, firefox, webkit } from "playwright";
 import { mockGithub } from "../tests/acceptance/github-mock.cjs";
-import { BASE, buildAndServe, stopAll } from "./helpers.mjs";
+import { readFileSync } from "node:fs";
+import { BASE, buildAndServe, dist, html, stopAll } from "./helpers.mjs";
 
 before(async () => { await buildAndServe(); });
 after(async () => { await stopAll(); });
 
+const REPEATS = 20;
 const ENGINES = { chromium, firefox, webkit };
 const launch = (engine) => ENGINES[engine].launch({ headless: true, executablePath: engine === "chromium" ? process.env.CHROMIUM_PATH || undefined : undefined });
 
@@ -174,26 +179,25 @@ describe("cross-document transition in chromium", () => {
   }
 
   // (b) Every other navigation: the 0.25 s root crossfade and no name on any element.
-  for (const o of OTHERS) {
-    test(`(b) ${o.label}: crossfade, no morph name`, async () => {
-      const { ctx, page, problems } = await open(browser, { start: o.start });
-      if (o.prepare) {
-        await o.prepare(page);
-        await page.evaluate(() => sessionStorage.removeItem("__vt"));
-      }
-      await o.go(page);
-      const s = summary(await settle(page, o.url));
-      assert.deepEqual(s.swap, { ev: "pageswap", vt: true, names: [] });
-      assert.equal(s.reveal.vt, true, "the new page received a transition");
-      assert.deepEqual(s.ready.names, []);
-      assert.ok(s.pseudos.includes("::view-transition-old(root)") && s.pseudos.includes("::view-transition-new(root)"), `the root crossfade runs: ${s.pseudos.join(" ")}`);
-      assert.ok(!s.pseudos.some((p) => p.includes("case-card")), `no morph group: ${s.pseudos.join(" ")}`);
-      assert.equal(s.duration("::view-transition-old(root)"), 250);
-      assert.equal(s.duration("::view-transition-new(root)"), 250);
-      assert.deepEqual(problems, []);
-      await ctx.close();
-    });
-  }
+  const crossfade = async (o) => {
+    const { ctx, page, problems } = await open(browser, { start: o.start });
+    if (o.prepare) {
+      await o.prepare(page);
+      await page.evaluate(() => sessionStorage.removeItem("__vt"));
+    }
+    await o.go(page);
+    const s = summary(await settle(page, o.url));
+    assert.deepEqual(s.swap, { ev: "pageswap", vt: true, names: [] });
+    assert.equal(s.reveal.vt, true, "the new page received a transition");
+    assert.deepEqual(s.ready.names, []);
+    assert.ok(s.pseudos.includes("::view-transition-old(root)") && s.pseudos.includes("::view-transition-new(root)"), `the root crossfade runs: ${s.pseudos.join(" ")}`);
+    assert.ok(!s.pseudos.some((p) => p.includes("case-card")), `no morph group: ${s.pseudos.join(" ")}`);
+    assert.equal(s.duration("::view-transition-old(root)"), 250);
+    assert.equal(s.duration("::view-transition-new(root)"), 250);
+    assert.deepEqual(problems, []);
+    await ctx.close();
+  };
+  for (const o of OTHERS) test(`(b) ${o.label}: crossfade, no morph name`, () => crossfade(o));
 
   // (c) Reduced motion and the pause (motion-paused = 1) run no transition, for the morph and for a crossfade.
   for (const mode of [{ label: "reduced motion emulated", opts: { reduce: true } }, { label: "motion-paused = 1", opts: { paused: true } }]) {
@@ -219,7 +223,7 @@ describe("cross-document transition in chromium", () => {
   }
 
   // (d) One name per page at every snapshot, through forward, back and forward again.
-  test("(d) no two elements carry one name at a snapshot, through a forward, back and forward sequence", async () => {
+  const oneNamePerSnapshot = async () => {
     const { ctx, page, problems } = await open(browser);
     const snapshots = [];
     const step = async (act, url) => {
@@ -240,6 +244,36 @@ describe("cross-document transition in chromium", () => {
     assert.ok(snapshots.every((names) => names.length <= 1), "at most one element is named at a snapshot");
     assert.deepEqual(problems, [], "no duplicate-name error reached the console");
     await ctx.close();
+  };
+  test("(d) no two elements carry one name at a snapshot, through a forward, back and forward sequence", oneNamePerSnapshot);
+
+  // D-061: the Back case and (d) again, each REPEATS times in this run, with 0 failures allowed.
+  const back = OTHERS.find((o) => o.label === "certway to home (Back)");
+  for (let n = 1; n <= REPEATS; n++) {
+    test(`(b) certway to home (Back): crossfade, no morph name [repeat ${n}/${REPEATS}]`, () => crossfade(back));
+    test(`(d) no two elements carry one name at a snapshot, through a forward, back and forward sequence [repeat ${n}/${REPEATS}]`, oneNamePerSnapshot);
+  }
+
+  // Without JavaScript there is no opt-in and no names: a click on a card and on a header link is an instant cut.
+  test("(h) without JavaScript: navigations complete with no console error and no static opt-in exists", async () => {
+    const ctx = await browser.newContext({ javaScriptEnabled: false });
+    const page = await ctx.newPage();
+    const problems = [];
+    page.on("console", (m) => { if (isProblem(m)) problems.push(`${m.type()}: ${m.text()}`); });
+    page.on("pageerror", (e) => problems.push(`pageerror: ${e.message}`));
+    await page.goto(BASE + "/", { waitUntil: "load" });
+    await page.click(MORPHS[0].link);
+    await page.waitForURL((u) => u.pathname === MORPHS[0].url);
+    assert.ok((await page.locator("h1").first().innerText()).length > 0, "the certway page is readable");
+    await page.click('header a[href="/"]');
+    await page.waitForURL((u) => u.pathname === "/");
+    assert.ok((await page.locator("h1").first().innerText()).length > 0, "home is readable");
+    assert.deepEqual(problems, []);
+    await ctx.close();
+    const home = html("index.html");
+    const css = home.match(/href="([^"]+\.css)"/);
+    assert.ok(css, "the built home links its stylesheet");
+    assert.ok(!/<style[^>]*>[^<]*@view-transition/.test(home) && !/@view-transition/.test(readFileSync(dist(css[1].replace(/^\//, "")), "utf8")), "the opt-in is in no <style> of the markup and not in the stylesheet: only the script inserts it");
   });
 
   // (e) skipTransition() is followed by a handled ready rejection: no unhandled rejection and no console error.

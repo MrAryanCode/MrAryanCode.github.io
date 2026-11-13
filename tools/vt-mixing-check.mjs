@@ -6,6 +6,7 @@
 // when a result differs from what the rules say.
 // HTML=<file> reads another built index.html. CHROMIUM_PATH=<browser path> (or CHANNEL, EXE) picks the browser.
 // NAIVE=1 removes the name cleanup from the script and skips part 1 (control run: part 2 must then fail).
+// NOOPTIN=1 removes the script's insertion of the opt-in (control run: no page opts in, so part 1 must fail).
 // UNGATED=1 starts the restore-time transition in part 2 without waiting for window.vtSettled() (control run: must fail).
 import http from "node:http";
 import fs from "node:fs";
@@ -16,8 +17,9 @@ import { chromium } from "playwright";
 const htmlFile = process.env.HTML || fileURLToPath(new URL("../dist/index.html", import.meta.url));
 const built = fs.readFileSync(htmlFile, "utf8");
 const scripts = [...built.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]).filter((s) => s.includes("vtSettled"));
-// The opt-in and the ::view-transition-* rules live in the site stylesheet (D-060), which the built page links. The check
-// keeps only those top-level rules (the rest of the sheet carries font URLs and layout this check does not serve).
+// The opt-in is inserted by the head script itself (D-061), so the served pages get it only from the script. The
+// ::view-transition-* rules live in the site stylesheet, which the built page links. The check keeps only those top-level
+// rules (the rest of the sheet carries font URLs and layout this check does not serve).
 function topLevelRules(text) {
   const rules = [];
   let depth = 0, start = 0;
@@ -29,11 +31,14 @@ function topLevelRules(text) {
   return rules;
 }
 const sheets = [...built.matchAll(/<link[^>]*rel="stylesheet"[^>]*href="([^"]+)"/g)].map((m) => m[1]);
-const sheetText = sheets.map((h) => fs.readFileSync(path.join(path.dirname(htmlFile), h), "utf8")).filter((s) => s.includes("@view-transition"));
+const sheetText = sheets.map((h) => fs.readFileSync(path.join(path.dirname(htmlFile), h), "utf8")).filter((s) => s.includes("::view-transition-group"));
 if (scripts.length !== 1 || sheetText.length !== 1) throw new Error(`expected one head script and one stylesheet with the view-transition rules in the built page, found ${scripts.length} and ${sheetText.length}`);
+if (sheetText[0].includes("@view-transition")) throw new Error("the built stylesheet carries the opt-in, which the head script must insert (D-061)");
+if (!scripts[0].includes("@view-transition { navigation: auto; }") || !scripts[0].includes("prefers-reduced-motion: reduce) { @view-transition { navigation: none; }")) throw new Error("the head script does not insert the opt-in and its reduced-motion form");
 const css = topLevelRules(sheetText[0]).filter((r) => r.includes("view-transition") || r.includes("vt-lift")).join("\n");
-if (!css.includes("@view-transition{navigation:auto}") || !css.includes("::view-transition-group(case-card)")) throw new Error("the built stylesheet lost the view-transition rules");
+if (!css.includes("::view-transition-group(case-card)") || !css.includes("::view-transition-image-pair(case-card)") || !css.includes("@keyframes vt-lift")) throw new Error("the built stylesheet lost the view-transition rules");
 let js = scripts[0];
+if (process.env.NOOPTIN) js = js.replace("document.head.appendChild(optIn);", "");
 if (process.env.NAIVE) js = js.replace("vt.finished.then(done, done);", "").replaceAll("clearNames();", "");
 const head = `<script>${js}</script>`;
 
