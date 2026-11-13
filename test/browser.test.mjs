@@ -29,7 +29,7 @@ async function open(path, { js = true, init = [], route } = {}) {
 }
 
 test("JavaScript off: every route reads", async () => {
-  const want = { "/": ["Aryan Miri", "v1.0.1", "MIT"], "/projects/certway/": ["certway case study", "v1.0.1", "Facts read from GitHub at"], "/report/": ["Engineering report", "reads with JavaScript disabled"], "/nope/x": ["404", "This page does not exist. These are the pages on this site:", "Home page", "Engineering report"] };
+  const want = { "/": ["Aryan Miri", "v1.0.1", "MIT"], "/projects/certway/": ["certway"], "/report/": ["Engineering report", "reads with JavaScript disabled"], "/nope/x": ["404", "This page does not exist. These are the pages on this site:", "Home page", "Engineering report"] };
   for (const [path, texts] of Object.entries(want)) {
     const { ctx, page, res } = await open(path, { js: false });
     assert.equal(res.status(), path === "/nope/x" ? 404 : 200, path);

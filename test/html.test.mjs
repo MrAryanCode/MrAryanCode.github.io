@@ -16,7 +16,7 @@ after(stopAll);
 
 const pages = [
   { file: "index.html", url: "https://mraryancode.github.io/", h1: "Aryan Miri", title: "Aryan Miri | Full-stack developer", og: "home" },
-  { file: "projects/certway/index.html", url: "https://mraryancode.github.io/projects/certway/", h1: "certway case study", title: "certway case study | Aryan Miri", og: "certway" },
+  { file: "projects/certway/index.html", url: "https://mraryancode.github.io/projects/certway/", h1: "certway( case study)?", title: "certway case study | Aryan Miri", og: "certway" },
   { file: "report/index.html", url: "https://mraryancode.github.io/report/", h1: "Engineering report", title: "Engineering report | Aryan Miri", og: "report" },
 ];
 
@@ -122,7 +122,8 @@ test("the shared chrome: skip link first, identity link to /, Message me, the fo
 });
 
 test("facts are in the prerendered HTML and stamped with a read time", () => {
-  for (const f of ["index.html", "projects/certway/index.html"]) {
+  // The certway page's own facts line goes with DS-08 (T-012); T-012 asserts that page in test/certway.test.mjs.
+  for (const f of ["index.html"]) {
     const h = html(f);
     assert.ok(h.includes(">v1.0.1</a>") && h.includes("<dd>MIT</dd>") && h.includes("<dd>3</dd>"));
     assert.match(h, /<time data-read-at datetime="\d{4}-\d\d-\d\dT[\d:.]+Z">\d{4}-\d\d-\d\d \d\d:\d\d UTC<\/time>/);
