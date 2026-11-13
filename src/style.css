@@ -307,6 +307,12 @@ html[data-motion="paused"] *::after { transition-duration: 0s !important; transi
   cursor: pointer;
 }
 
+/* The pause button's slot holds its space from first paint, only where script runs motion (DS-01). */
+.pause-slot { display: none; }
+@media (scripting: enabled) and (prefers-reduced-motion: no-preference) {
+  .pause-slot { display: block; min-width: calc(58px + 12ch); min-height: 44px; font: 500 13px var(--font-mono); }
+}
+
 /* Reading progress line: hidden until T-033 drives it, and with the still look. */
 [data-fx="progress"] {
   position: fixed;

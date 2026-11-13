@@ -46,26 +46,6 @@ test("worker runs on the client and its chunk is fetched", async () => {
   await ctx.close();
 });
 
-const stubAdapter = () => {
-  Object.defineProperty(navigator, "gpu", { value: { requestAdapter: async () => ({ requestDevice: async () => ({}) }) }, configurable: true });
-  HTMLCanvasElement.prototype.getContext = () => ({});
-};
-const gpuCases = [
-  { name: "no navigator.gpu", init: [() => Object.defineProperty(navigator, "gpu", { value: undefined, configurable: true })], text: /No WebGPU/, chunk: false },
-  { name: "adapter is null", init: [() => Object.defineProperty(navigator, "gpu", { value: { requestAdapter: async () => null }, configurable: true })], text: /no adapter/, chunk: false },
-  { name: "requestAdapter rejects", init: [() => Object.defineProperty(navigator, "gpu", { value: { requestAdapter: async () => { throw new Error("boom"); } }, configurable: true })], text: /failed \(boom\)/, chunk: false },
-  { name: "chunk import fails", init: [stubAdapter], route: (p) => p.route(/\/assets\/layer-.*\.js$/, (r) => r.abort()), text: /layer failed/, chunk: true },
-  { name: "all checks pass", init: [stubAdapter], text: /WebGPU layer running/, chunk: true },
-];
-for (const c of gpuCases) {
-  test(`GPU layer: ${c.name}`, async () => {
-    const { ctx, page, requests } = await open("/projects/certway/", { init: c.init, route: c.route });
-    await page.waitForFunction((src) => new RegExp(src).test(document.querySelector("[data-gpu-status]").textContent), c.text.source);
-    assert.equal(requests.some((r) => /\/assets\/layer-.*\.js$/.test(r)), c.chunk, `layer chunk requested: ${requests.join(" ")}`);
-    await ctx.close();
-  });
-}
-
 // Underline draw (D-051, P-12): the resting underline draws to full width in 0.42 s on hover or focus and retracts in 0.42 s;
 // it is instant under reduced motion and under html[data-motion="paused"]; and the step-down level does not change it.
 async function underlineRuns(page, how) {

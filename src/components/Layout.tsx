@@ -24,6 +24,8 @@ export function Layout(props: { children: JSX.Element; build: Build | null; rout
           </span>
         </a>
         <div class="site-nav">
+          {/* Filled by the pause control after hydration (T-019); it holds the button's space from first paint. */}
+          <span class="pause-slot" data-client-only></span>
           <a href={contact.telegramUrl}>Message me</a>
         </div>
       </header>
