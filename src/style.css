@@ -46,6 +46,7 @@
   --gutter: 20px;
   --section-gap: 64px;
   --band-pad-y: 48px;
+  --band-pad-b: 44px;
   --panel-pad: 24px;
   --panel-gap: 16px;
 }
@@ -76,7 +77,7 @@
 
 @media (min-width: 480px) { :root { --gutter: 32px; } }
 @media (min-width: 960px) {
-  :root { --section-gap: 104px; --band-pad-y: 72px; --panel-pad: 34px; --panel-gap: 20px; }
+  :root { --section-gap: 104px; --band-pad-y: 72px; --band-pad-b: 60px; --panel-pad: 34px; --panel-gap: 20px; }
 }
 @media (min-width: 1200px) { :root { --gutter: 40px; } }
 
@@ -226,6 +227,15 @@ a {
   transition: background-size 0.42s ease-in-out;
 }
 a:visited { color: var(--link-visited); }
+/* Links with a 44px target: the padding makes the box 44px and the lines sit on the content box, so the underline is
+   under the text and not at the bottom of the box. The identity link (two lines, taller than 44px) needs no padding. */
+.site-nav a,
+dd a,
+.tile a,
+.links-row a {
+  padding-block: calc((44px - 1lh) / 2);
+  background-origin: content-box;
+}
 a:hover,
 a:focus-visible {
   background-position: left bottom, left bottom;
@@ -256,6 +266,8 @@ html[data-motion="paused"] *::after { transition-duration: 0s !important; transi
 }
 #root > header a,
 .site-nav a { display: inline-flex; align-items: center; min-height: 44px; }
+/* The identity link: the name dominates, the handle under it recedes (DS-01). */
+#root > header a small { color: var(--text-2); font-size: 0.8em; }
 .site-nav { display: inline-flex; flex-wrap: wrap; gap: 6px 24px; }
 @media (min-width: 480px) {
   #root > header { min-height: 80px; flex-wrap: nowrap; }
@@ -271,7 +283,8 @@ html[data-motion="paused"] *::after { transition-duration: 0s !important; transi
 }
 #root > footer p { margin: 0.25rem 0; }
 .footer-groups { display: grid; gap: 28px; margin-top: 28px; font-size: 12.5px; }
-.footer-stamp { margin-top: 40px; }
+.footer-stamp { margin-top: 40px; font-size: 11.5px; line-height: 1.4; }
+.footer-stamp small { font-size: inherit; }
 @media (min-width: 760px) {
   .footer-groups { grid-template-columns: 1fr 1fr; }
 }
@@ -394,7 +407,7 @@ code, kbd, samp, pre { font-family: var(--font-mono); font-size: 0.9em; }
   background-position: left top, left top, right top, right top, left bottom, left bottom, right bottom, right bottom;
   background-repeat: no-repeat;
 }
-.band::before { inset: var(--band-pad-y) var(--pad-x); }
+.band::before { inset: var(--band-pad-y) var(--pad-x) var(--band-pad-b); }
 .panel-card { transition: border-color 0.2s ease-out; }
 .panel-card:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
 .card-summary { color: var(--text-2); max-width: 40em; }
@@ -449,9 +462,11 @@ dd { margin: 0; font-family: var(--font-mono); font-variant-numeric: tabular-num
 .failed-note { display: flex; gap: 10px; align-items: flex-start; margin: 0 0 8px; color: var(--text-2); font-family: var(--font-mono); font-size: 13px; line-height: 1.55; }
 
 /* ---------- Header band (case study and report, DV-02.1) ---------- */
-.band {
+/* The second selector outranks `#root > main > section`, so a band that is a section keeps its own padding. */
+.band,
+#root > main > section.band {
   position: relative;
-  padding-block: var(--band-pad-y) calc(var(--band-pad-y) - 4px);
+  padding-block: var(--band-pad-y) var(--band-pad-b);
   background: var(--surface);
   border-bottom: 1px solid var(--border);
   box-shadow: inset 0 1px 0 color-mix(in srgb, var(--accent) 22%, transparent);
