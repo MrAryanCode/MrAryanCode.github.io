@@ -78,7 +78,7 @@ test("the loader starts tier 1 and creates the pause button before Message me", 
   await page.waitForSelector("button.pause");
   await page.waitForFunction(() => document.documentElement.dataset.tier);
   assert.equal(tier1Requests(requests).length, 1, `tier 1 requested: ${requests.join(" ")}`);
-  assert.deepEqual(await state(page), { label: "Pause motion", pressed: "false", motion: null, tier: "0", stored: null });
+  assert.deepEqual(await state(page), { label: "Pause motion", pressed: "false", motion: null, tier: "1", stored: null });
   const order = await page.evaluate(() => [...document.querySelectorAll("header a, header button")].map((el) => el.textContent.trim()));
   assert.deepEqual(order.slice(-2), ["Pause motion", "Message me"]);
   assert.deepEqual(logs, []);
