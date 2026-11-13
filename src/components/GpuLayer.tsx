@@ -27,8 +27,8 @@ export function GpuLayer() {
   });
 
   return (
-    <section aria-labelledby="gpu-h">
-      <h2 id="gpu-h">WebGPU layer</h2>
+    <section>
+      <p>WebGPU layer</p>
       <canvas ref={canvas} width="320" height="120" aria-hidden="true" data-client-only />
       <p data-gpu-status data-client-only>{status()}</p>
     </section>

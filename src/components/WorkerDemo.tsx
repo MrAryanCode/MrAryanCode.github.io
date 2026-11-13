@@ -18,8 +18,8 @@ export function WorkerDemo() {
   });
 
   return (
-    <section aria-labelledby="worker-h">
-      <h2 id="worker-h">Worker</h2>
+    <section>
+      <p>Worker</p>
       <p data-client-only data-worker-result>{text()}</p>
     </section>
   );
