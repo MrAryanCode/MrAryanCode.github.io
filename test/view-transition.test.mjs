@@ -268,11 +268,11 @@ describe("cross-document transition in chromium", () => {
   // (a) The title is legible mid-morph (T-037, G-69; reference cross-document-view-transitions-text-morphs section 3): paused at
   // ready, the glyphs of the old h3 image and of the new h1 image are the same size. The old image shows the h3's whole line
   // box, 1.25 x its font size, so its glyph height is its height / 1.25; the new image shows all of the h1's lines, one font size
-  // each, so its glyph height is its height / lines. Without src/style.css's title rules the two images are scaled to the group's
-  // width and differ about 2x (the reference measured 1 line at 1280 px; 2 lines at 390 px). The reference gives no numeric
-  // tolerance: it measured 69.1 px against 69.1 px, so 2 % leaves room for rounding and stays far from the 2x defect.
+  // each, so its glyph height is its height / lines. Section 3's bound is equality: with the title rules the glyph height
+  // "matched" (86.4 / 1.25 = 69.1 px against 69.1 px), and without them the images differ about 2x (the h3's line box
+  // being left out of the height, 0.8x). The tolerance below allows layout rounding only (boxes are sized in 1/64 px).
   const H3_LINE_HEIGHT = 1.25;
-  const GLYPH_TOLERANCE = 0.02;
+  const GLYPH_TOLERANCE = 0.005;
   const TITLE_VIEWPORTS = [{ label: "1280 px wide", viewport: { width: 1280, height: 800 } }, { label: "390 px wide", viewport: { width: 390, height: 844 } }];
   for (const m of MORPHS) {
     for (const v of TITLE_VIEWPORTS) {
