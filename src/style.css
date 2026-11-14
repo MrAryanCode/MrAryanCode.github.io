@@ -597,6 +597,13 @@ table.perf th:not(:first-child) { text-align: right; }
 .row:hover .row-label,
 .row:focus-visible .row-label { background-position: left bottom, left bottom; background-size: 100% 1.5px, 100% 1px; }
 .row-arrow { flex: none; width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; }
+/* Paused and reduced motion: the arrow shows its 4 px at once (DV-02.5, A-4); running, it is the pointer effects' spring. */
+html[data-motion="paused"] .row:hover .row-arrow,
+html[data-motion="paused"] .row:focus-visible .row-arrow { transform: translateX(4px); }
+@media (prefers-reduced-motion: reduce) {
+  .row:hover .row-arrow,
+  .row:focus-visible .row-arrow { transform: translateX(4px); }
+}
 @media (min-width: 760px) {
   .not-found { min-height: calc(100svh - 80px); }
 }

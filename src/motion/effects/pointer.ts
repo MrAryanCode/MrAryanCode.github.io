@@ -21,12 +21,15 @@ import {
   type Spring,
 } from "../spring.ts";
 
-const TILT_MAX_X = 4; // deg
-const TILT_MAX_Y = 5; // deg
+// The mockup's gains (home-03 bundle): the tilt peaks at the card's edge at 2 deg by 2.5 deg, inside the table's 4 deg by 5 deg.
+const TILT_MAX_X = 2; // deg
+const TILT_MAX_Y = 2.5; // deg
+const TILT_PERSPECTIVE = 1100; // px
 const TILT_FOLLOW = "transform 0.14s ease-out";
 const TILT_RETURN_MS = 900;
 const TILT_RETURN = `transform ${TILT_RETURN_MS}ms cubic-bezier(0.22, 0.61, 0.36, 1)`;
 const PARALLAX_MAX = 6; // px
+const PARALLAX_GAIN = 10; // px per viewport of distance from the centre
 const PARALLAX_CATCH_UP = "translate 0.9s ease-out";
 const MAGNET_X = 5; // px
 const MAGNET_Y = 4; // px
@@ -135,8 +138,8 @@ export function start(root: HTMLElement, signal: AbortSignal): Promise<void> {
     const ny = clamp((e.clientY - r.top) / r.height, 0, 1);
     const ry = (nx - 0.5) * 2 * TILT_MAX_Y;
     const rx = -(ny - 0.5) * 2 * TILT_MAX_X;
-    c.el.style.transform = `perspective(900px) rotateX(${rx.toFixed(2)}deg) rotateY(${ry.toFixed(2)}deg)`;
-    if (c.glare) c.glare.style.backgroundImage = `radial-gradient(circle ${GLARE_RADIUS}px at ${(nx * 100).toFixed(1)}% ${(ny * 100).toFixed(1)}%, var(--glare), transparent)`;
+    c.el.style.transform = `perspective(${TILT_PERSPECTIVE}px) rotateX(${rx.toFixed(2)}deg) rotateY(${ry.toFixed(2)}deg)`;
+    if (c.glare) c.glare.style.backgroundImage = `radial-gradient(circle ${GLARE_RADIUS}px at ${(nx * 100).toFixed(1)}% ${(ny * 100).toFixed(1)}%, var(--glare), transparent 65%)`;
   }
 
   /** The soft ease-out return to rest, then the glare is removed. */
@@ -185,7 +188,8 @@ export function start(root: HTMLElement, signal: AbortSignal): Promise<void> {
     const half = innerHeight / 2;
     for (const c of cards.values()) {
       if (!c.parallax) continue;
-      const shift = clamp((c.centreY - scrollY - half) / innerHeight, -1, 1) * PARALLAX_MAX;
+      // A card below the centre moves up (the mockup's sign).
+      const shift = clamp(-((c.centreY - scrollY - half) / innerHeight) * PARALLAX_GAIN, -PARALLAX_MAX, PARALLAX_MAX);
       if (Math.abs(shift - c.shift) < 0.05) continue;
       c.shift = shift;
       if (!c.armed) {
@@ -270,7 +274,7 @@ export function start(root: HTMLElement, signal: AbortSignal): Promise<void> {
     m.dy = clamp(((e.clientY - cy) / (r.height / 2)) * MAGNET_Y, -MAGNET_Y, MAGNET_Y);
     el.style.translate = `${m.dx.toFixed(2)}px ${m.dy.toFixed(2)}px`;
     // The glow spot follows the pointer. It is a background-image only, so the pill keeps its opaque background-color (A-1 (e)).
-    el.style.backgroundImage = `radial-gradient(circle ${GLOW_RADIUS}px at ${(e.clientX - r.left).toFixed(1)}px ${(e.clientY - r.top).toFixed(1)}px, ${dark.matches ? GLOW_DARK : GLOW_LIGHT}, transparent)`;
+    el.style.backgroundImage = `radial-gradient(circle ${GLOW_RADIUS}px at ${(e.clientX - r.left).toFixed(1)}px ${(e.clientY - r.top).toFixed(1)}px, ${dark.matches ? GLOW_DARK : GLOW_LIGHT}, transparent 70%)`;
   }
 
   /** A-4: from the current offset with no velocity the spring runs along a straight line, so one bake on its length. */
@@ -343,7 +347,7 @@ export function start(root: HTMLElement, signal: AbortSignal): Promise<void> {
   function ringFrame(ts: number): void {
     ringId = 0;
     if (!ring) return;
-    const dt = Math.min((ts - ringLast) / 1000, RING_MAX_DT);
+    const dt = Math.max(0, Math.min((ts - ringLast) / 1000, RING_MAX_DT)); // rAF's timestamp can precede performance.now()
     ringLast = ts;
     ringStep(axes.x, goal.x, dt);
     ringStep(axes.y, goal.y, dt);
@@ -406,6 +410,18 @@ export function start(root: HTMLElement, signal: AbortSignal): Promise<void> {
   // ---- the 404 link-row arrow (stays at every rank) ------------------------------------------------------------------
 
   const arrows: Spring[] = [];
+  /** Puts the arrow at `target` with no motion, leaving its one animation finished there. */
+  function snap(sp: Spring, target: number): void {
+    const kf = { transform: `translateX(${target}px)` };
+    const effect = sp.anim.effect as KeyframeEffect;
+    effect.setKeyframes([kf, kf]);
+    effect.updateTiming({ duration: 1, easing: "linear" });
+    sp.anim.finish();
+    sp.target = target;
+    sp.u0 = 0;
+    sp.v0 = 0;
+    sp.T = 0;
+  }
   function startArrows(): void {
     // Without `linear()` there is no baked spring: the arrow rests, as it does in the other still cases.
     if (!CSS.supports("animation-timing-function", "linear(0, 1)")) return;
@@ -416,15 +432,19 @@ export function start(root: HTMLElement, signal: AbortSignal): Promise<void> {
       arrows.push(sp);
       let hover = false;
       let focus = false;
-      const aim = (): void => {
-        const to = hover || focus ? ARROW_TRAVEL : 0;
-        if (to !== sp.target) retarget(sp, to);
+      let tap = false;
+      // A touch tap shows the arrow at once (DV-02.5 phone column): no spring.
+      const aim = (instant: boolean): void => {
+        const to = hover || focus || tap ? ARROW_TRAVEL : 0;
+        if (to === sp.target) return;
+        if (instant) snap(sp, to);
+        else retarget(sp, to);
       };
       const on = { signal };
-      row.addEventListener("pointerenter", (e) => { if (isFine(e)) { hover = true; aim(); } }, on);
-      row.addEventListener("pointerleave", (e) => { if (isFine(e)) { hover = false; aim(); } }, on);
-      row.addEventListener("focusin", () => { focus = row.matches(":focus-visible"); aim(); }, on);
-      row.addEventListener("focusout", () => { focus = false; aim(); }, on);
+      row.addEventListener("pointerenter", (e) => { if (isFine(e)) hover = true; else tap = true; aim(!isFine(e)); }, on);
+      row.addEventListener("pointerleave", (e) => { if (isFine(e)) hover = false; else tap = false; aim(!isFine(e)); }, on);
+      row.addEventListener("focusin", () => { focus = row.matches(":focus-visible"); aim(false); }, on);
+      row.addEventListener("focusout", () => { focus = false; aim(false); }, on);
     }
   }
 
