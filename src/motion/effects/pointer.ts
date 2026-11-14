@@ -66,7 +66,8 @@ interface Card {
 }
 
 export function start(root: HTMLElement, signal: AbortSignal): Promise<void> {
-  if (signal.aborted) return Promise.resolve();
+  // No body means a host with no page to move (the loader's unit test stubs `document` without one): nothing to start.
+  if (signal.aborted || !document.body) return Promise.resolve();
   const cards = new Map<HTMLElement, Card>();
   let tiltOn = false;
   let parallaxOn = false;
