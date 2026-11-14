@@ -34,6 +34,10 @@ const ARROW_TRAVEL = 4; // px
 const RING_SIZE = 28; // px
 const RING_PAD_X = 14; // px
 const RING_PAD_Y = 10; // px
+const GLARE_RADIUS = 420; // px (DV-01.1: card glare, radial 420px)
+const GLOW_RADIUS = 140; // px (DV-01.1: pointer glow, radial 140px)
+const GLOW_DARK = "rgb(255 255 255 / 35%)";
+const GLOW_LIGHT = "rgb(198 244 50 / 16%)";
 
 const RANK_TILT = 1;
 const RANK_PARALLAX = 5;
@@ -130,7 +134,7 @@ export function start(root: HTMLElement, signal: AbortSignal): Promise<void> {
     const ry = (nx - 0.5) * 2 * TILT_MAX_Y;
     const rx = -(ny - 0.5) * 2 * TILT_MAX_X;
     c.el.style.transform = `perspective(900px) rotateX(${rx.toFixed(2)}deg) rotateY(${ry.toFixed(2)}deg)`;
-    if (c.glare) c.glare.style.backgroundImage = `radial-gradient(circle at ${(nx * 100).toFixed(1)}% ${(ny * 100).toFixed(1)}%, var(--glare), transparent 65%)`;
+    if (c.glare) c.glare.style.backgroundImage = `radial-gradient(circle ${GLARE_RADIUS}px at ${(nx * 100).toFixed(1)}% ${(ny * 100).toFixed(1)}%, var(--glare), transparent)`;
   }
 
   /** The soft ease-out return to rest, then the glare is removed. */
@@ -224,6 +228,7 @@ export function start(root: HTMLElement, signal: AbortSignal): Promise<void> {
     anim: Animation | null;
   }
   const magnets = new Map<HTMLElement, Magnet>();
+  const dark = matchMedia("(prefers-color-scheme: dark)");
 
   function magnet(el: HTMLElement): Magnet {
     let m = magnets.get(el);
@@ -254,6 +259,8 @@ export function start(root: HTMLElement, signal: AbortSignal): Promise<void> {
     m.dx = clamp(((e.clientX - cx) / (r.width / 2)) * MAGNET_X, -MAGNET_X, MAGNET_X);
     m.dy = clamp(((e.clientY - cy) / (r.height / 2)) * MAGNET_Y, -MAGNET_Y, MAGNET_Y);
     el.style.translate = `${m.dx.toFixed(2)}px ${m.dy.toFixed(2)}px`;
+    // The glow spot follows the pointer. It is a background-image only, so the pill keeps its opaque background-color (A-1 (e)).
+    el.style.backgroundImage = `radial-gradient(circle ${GLOW_RADIUS}px at ${(e.clientX - r.left).toFixed(1)}px ${(e.clientY - r.top).toFixed(1)}px, ${dark.matches ? GLOW_DARK : GLOW_LIGHT}, transparent)`;
   }
 
   /** A-4: from the current offset with no velocity the spring runs along a straight line, so one bake on its length. */
@@ -263,6 +270,7 @@ export function start(root: HTMLElement, signal: AbortSignal): Promise<void> {
     m.dx = 0;
     m.dy = 0;
     m.el.style.translate = "";
+    m.el.style.backgroundImage = "";
     const b = length > 0.01 && CSS.supports("animation-timing-function", "linear(0, 1)") ? bake(BUTTON_SPRING.k, BUTTON_SPRING.c, length, 0) : null;
     if (!b) return;
     m.anim = m.el.animate([{ translate: from }, { translate: "0px 0px" }], { duration: b.durationMs, easing: b.easing });
@@ -275,6 +283,7 @@ export function start(root: HTMLElement, signal: AbortSignal): Promise<void> {
       m.dx = 0;
       m.dy = 0;
       m.el.style.translate = "";
+      m.el.style.backgroundImage = "";
     }
     magnets.clear();
     hoverMagnet = null;

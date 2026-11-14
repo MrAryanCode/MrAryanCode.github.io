@@ -101,14 +101,15 @@ const rows = [
     name: "magnetic primary button", rank: 6, path: "/",
     async hover(page) { const p = await pointIn(page, "[data-fx~=magnet]", 0.9, 0.5); await page.mouse.move(p.x, p.y, { steps: 4 }); },
     act: () => { const el = document.querySelector("[data-fx~=magnet]"); const t = getComputedStyle(el).translate; return t !== "none" && Math.abs(parseFloat(t)) > 0.5; },
-    rest: () => { const el = document.querySelector("[data-fx~=magnet]"); return el.style.translate === "" && !el.getAnimations().some((a) => a.effect.getKeyframes().some((k) => k.translate !== undefined)); },
+    rest: () => { const el = document.querySelector("[data-fx~=magnet]"); return el.style.translate === "" && el.style.backgroundImage === "" && !el.getAnimations().some((a) => a.effect.getKeyframes().some((k) => k.translate !== undefined)); },
     async poke(page) { await away(page); const p = await pointIn(page, "[data-fx~=magnet]", 0.1, 0.5); await page.mouse.move(p.x, p.y, { steps: 4 }); },
   },
   {
     name: "404 link-row arrow", rank: null, path: "/404.html",
     async hover(page) { const p = await pointIn(page, ".row", 0.5, 0.5); await page.mouse.move(p.x, p.y, { steps: 4 }); },
     act: () => { const m = /^matrix\(([^)]*)\)$/.exec(getComputedStyle(document.querySelector("[data-fx~=arrow]")).transform); return !!m && Number(m[1].split(",")[4]) > 0.5; },
-    rest: () => { const el = document.querySelector("[data-fx~=arrow]"); return el.getAnimations().length === 0 && getComputedStyle(el).transform === "none"; },
+    // DV-02.5 has the arrow instant, not absent, under Pause and reduced motion: only "no animation" holds either way.
+    rest: () => document.querySelector("[data-fx~=arrow]").getAnimations().length === 0,
     async poke(page) { await away(page); const p = await pointIn(page, ".row", 0.4, 0.5); await page.mouse.move(p.x, p.y, { steps: 4 }); },
   },
 ];
@@ -279,6 +280,18 @@ for (const engine of Object.keys(ENGINES)) {
       assert.ok(Math.abs(o.x) <= 5.01 && Math.abs(o.y) <= 4.01, `offset ${o.x}, ${o.y}`);
       assert.ok(o.x > 4 && o.y > 3, `offset ${o.x}, ${o.y} at the corner`);
       assert.equal(o.anim, null, "no animation while the pointer is over the button");
+      // The glow spot (140 px radial, DV-01.1) follows the pointer on a background-image; the fill colour stays opaque.
+      const glow = () => page.evaluate(() => { const el = document.querySelector("[data-fx~=magnet]"); return { image: el.style.backgroundImage, color: getComputedStyle(el).backgroundColor }; });
+      const at = (s) => Number(/at (-?[\d.]+)px/.exec(s)[1]);
+      let g = await glow();
+      assert.match(g.image, /radial-gradient\((circle )?140px at /);
+      assert.doesNotMatch(g.color, /^rgba\(.*, 0\)$|transparent/, `the pill keeps an opaque fill, not ${g.color}`);
+      const gx = at(g.image);
+      const mid = await pointIn(page, "[data-fx~=magnet]", 0.3, 0.5);
+      await page.mouse.move(mid.x, mid.y, { steps: 3 });
+      g = await glow();
+      assert.ok(at(g.image) < gx - 20, `the glow spot moved with the pointer (${gx} to ${at(g.image)})`);
+      await page.mouse.move(corner.x, corner.y, { steps: 3 });
       await away(page);
       o = await offset();
       assert.ok(o.anim && o.anim.easing.startsWith("linear(") && o.anim.duration > 400 && o.anim.duration <= 620, `return ${JSON.stringify(o.anim)}`);
