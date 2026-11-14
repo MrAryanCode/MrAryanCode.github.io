@@ -4,7 +4,7 @@
 import { effectsFor, frameScalars, k3Of, k5Of } from "./core.ts";
 import type { Effects, Frame, Ripple, Scene, Trail } from "./core.ts";
 import type { Variant } from "./modes.ts";
-import { hookView, started } from "./tier3.ts";
+import { hookView, resetCalls, started } from "./tier3.ts";
 import type { HookView } from "./tier3.ts";
 
 const RATE: Record<Variant, number> = { full: 1, soft: 0.5, off: 0 };
@@ -97,6 +97,8 @@ export function installSeekHook(): void {
       if (override) hookView()?.setEffects(override);
       return true;
     }),
+    /** How many times tier 3 has called the step-down monitor's reset(); it does not hold the field. */
+    resets: () => resetCalls(),
     at(t: number, tf: number, scrollY = 0, input?: Input) {
       const v = need();
       window.scrollTo(0, scrollY);

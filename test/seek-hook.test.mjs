@@ -656,8 +656,8 @@ for (const E of ENGINES) {
 
     if (E.api === "webgpu") {
       /** Opens the home page with the re-request patched; the canvas drawn so far is noted as the first one. */
-      const openLoss = async () => {
-        const o = await openHook("/", { init: [patchRequests, watchCanvases] });
+      const openLoss = async (route = "/") => {
+        const o = await openHook(route, { init: [patchRequests, watchCanvases] });
         await o.page.evaluate(() => { window.__first = document.querySelector("body > div[aria-hidden='true'] canvas"); });
         return o;
       };
@@ -720,6 +720,101 @@ for (const E of ENGINES) {
         assert.equal(await page.evaluate(() => document.documentElement.dataset.field), undefined);
         assert.ok(await page.locator("h1").first().isVisible(), "the page still reads");
         assert.deepEqual(errors, []);
+        await ctx.close();
+      });
+
+      // D-064 item 4: a re-requested software adapter is declined like a null adapter; recovery goes on to WebGL2, which
+      // applies its own SwiftShader check, so on a hardware WebGL2 the page draws there.
+      gpuTest("A-1 context loss: a software adapter on the re-request, with a working WebGL2, draws on WebGL2", async () => {
+        const { ctx, page, errors } = await openLoss();
+        await page.evaluate(() => { globalThis.T3_ALLOW_SOFTWARE = false; });
+        await lose(page, "fallback");
+        await drawnAgain(page);
+        assert.equal(await page.evaluate(() => globalThis.__T3_SEEK__.layout().renderer.api), "webgl2");
+        assert.equal(await canvases(page), 1);
+        assert.equal(await page.evaluate(() => document.documentElement.dataset.tier), "3");
+        assert.deepEqual(errors, []);
+        await ctx.close();
+      });
+
+      // A-3 reset() on every loss and every canvas swap, counted in tier 3's test build. certway has no formation, so no
+      // other reset happens between the loss and the swap; the swap's own count is at least two (the swap, then the new
+      // canvas's size and mask), which is what a missing reset() in the swap cannot reach.
+      gpuTest("A-3: reset() runs on a WebGPU loss and on the canvas swap", async () => {
+        const { ctx, page } = await openLoss(PAGES.certway);
+        const resets = () => page.evaluate(() => globalThis.__T3_SEEK__.resets());
+        const before = await resets();
+        await lose(page, "again");
+        await page.waitForFunction((n) => globalThis.__T3_SEEK__.resets() > n, before, { timeout: 250 }); // inside the 300 ms re-request
+        const afterLoss = await resets();
+        assert.equal(afterLoss, before + 1, "the loss calls reset() once");
+        await drawnAgain(page);
+        assert.ok((await resets()) >= afterLoss + 2, `the swap calls reset() (${afterLoss} after the loss, ${await resets()} after the swap)`);
+        await ctx.close();
+      });
+
+      // The hook looks the backend up on every call: a recovery replaces it, and a view taken before must not keep the old one.
+      gpuTest("the hook reaches the new backend after a recovery", async () => {
+        const before = await reference();
+        const { ctx, page } = await openLoss();
+        assert.equal(await page.evaluate(() => globalThis.__T3_SEEK__.layout().renderer.api), "webgpu"); // takes the view; the hook now holds the field
+        await lose(page, "null");
+        await page.waitForFunction(() => globalThis.__T3_SEEK__.layout().renderer.api === "webgl2", undefined, { timeout: 10000 });
+        assert.equal(await page.evaluate(() => globalThis.__T3_SEEK__.raw(0, 99, 0, 0, 400)), before, "the frame read through the hook is the same");
+        await ctx.close();
+      });
+    }
+
+    if (E.api === "webgl2") {
+      const sel = "body > div[aria-hidden='true'] canvas";
+      const resets = (page) => page.evaluate(() => globalThis.__T3_SEEK__.resets());
+      const visibility = (page) => page.evaluate((q) => getComputedStyle(document.querySelector(q)).visibility, sel);
+      const dither = (page) => page.evaluate((q) => { const gl = document.querySelector(q).getContext("webgl2"); return gl.isEnabled(gl.DITHER); }, sel);
+      // A lost context gives no extension, so the one taken before the loss is kept for the restore.
+      const loseContext = (page) => page.evaluate((q) => {
+        window.__loseExt = document.querySelector(q).getContext("webgl2").getExtension("WEBGL_lose_context");
+        window.__loseExt.loseContext();
+      }, sel);
+      const restoreContext = (page) => page.evaluate(() => window.__loseExt.restoreContext());
+      const shown = (page) => page.waitForFunction((q) => getComputedStyle(document.querySelector(q)).visibility === "visible", sel, { timeout: 10000 });
+
+      // The context is lost and restored from the page, as the platform would; the hook's lose() holds the field's loop,
+      // and the redraw after the restore is what shows the canvas again.
+      gpuTest("A-1 context loss (WebGL2): hidden on the loss, shown after the first draw after the restore, reset() on both, DITHER off again", async () => {
+        const { ctx, page, errors } = await openHook(PAGES.certway);
+        assert.equal(await visibility(page), "visible");
+        assert.equal(await dither(page), false, "DITHER is off");
+        const before = await resets(page);
+        await loseContext(page);
+        await page.waitForFunction((n) => globalThis.__T3_SEEK__.resets() > n, before, { timeout: 5000 });
+        assert.equal(await resets(page), before + 1, "the loss calls reset() once");
+        assert.equal(await visibility(page), "hidden", "the canvas is hidden on the loss");
+        await page.waitForTimeout(200);
+        assert.equal(await visibility(page), "hidden", "and stays hidden while the context is lost");
+        await restoreContext(page);
+        await shown(page);
+        // The loss (1), the restore (1) and the new geometry the cleared keys cause on the next draw (1).
+        assert.ok((await resets(page)) >= before + 3, `the restore calls reset() (${before} before, ${await resets(page)} after)`);
+        assert.equal(await dither(page), false, "DITHER is off again after the restore");
+        assert.equal(await page.evaluate(() => document.documentElement.dataset.tier), "3");
+        assert.deepEqual(errors, []);
+        await ctx.close();
+      });
+
+      gpuTest("A-1 context loss (WebGL2): the mask is uploaded again after the restore", async () => {
+        const reference = async () => {
+          const o = await openHook("/");
+          const frame = await o.page.evaluate(() => globalThis.__T3_SEEK__.raw(0, 99, 0, 0, 400));
+          await o.ctx.close();
+          return frame;
+        };
+        const want = await reference();
+        const { ctx, page } = await openHook("/");
+        await loseContext(page);
+        await page.waitForTimeout(200);
+        await restoreContext(page);
+        await shown(page);
+        assert.equal(await page.evaluate(() => globalThis.__T3_SEEK__.raw(0, 99, 0, 0, 400)), want, "the frame is the same after the restore");
         await ctx.close();
       });
     }

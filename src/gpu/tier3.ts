@@ -2,7 +2,7 @@
 // page, drawn by WebGPU or, when that fails, WebGL2. This file is the lifecycle: it measures the page, owns the canvas
 // and the formation clock, feeds the step-down monitor (A-3) and hands pointer input from tier 2 to the writer in core.ts.
 // `start` resolves true once the first frame is drawn and false when tier 3 declines; on false nothing of it stays in the DOM.
-import { frame as budgetFrame, interval, level, onLevel, reset } from "../motion/budget.ts";
+import { frame as budgetFrame, interval, level, onLevel, reset as budgetReset } from "../motion/budget.ts";
 import { onOutput } from "../workers/tier2.ts";
 import {
   FORMATION_END, INPUT_LAG_S, PHONE_BELOW, UniformBlock, cellCss, effectsFor, formationMode, geometry, maskCells, maskRect,
@@ -12,6 +12,15 @@ import type { Band, DevRect, Effects, Frame, MaskCells, Ripple, Scene, Trail } f
 import type { FormationMode, MaskPage, Theme } from "./modes.ts";
 import type { Backend } from "./webgl2.ts";
 import { createWebGl2 } from "./webgl2.ts";
+
+// The step-down monitor's reset (A-3), counted in test builds so a test can assert that a loss and a canvas swap call it.
+let resets = 0;
+const reset = (): void => {
+  if (__SEEK_HOOK__) resets++;
+  budgetReset();
+};
+/** The number of reset() calls this module has made (the seek hook reads it; test builds only). */
+export const resetCalls = (): number => resets;
 
 const REDUCED = "(prefers-reduced-motion: reduce)";
 const DARK = "(prefers-color-scheme: dark)";
@@ -480,6 +489,7 @@ async function startRun(root: HTMLElement, signal: AbortSignal): Promise<boolean
   const onLost = (): void => {
     if (!current) return;
     current.lost = true;
+    current.canvas.style.visibility = "hidden"; // A-1: hidden from the loss until the first draw after it
     reset();
     if (current.backend.api === "webgpu") void recover(current);
   };
@@ -489,7 +499,6 @@ async function startRun(root: HTMLElement, signal: AbortSignal): Promise<boolean
   const recover = async (run: Run): Promise<void> => {
     if (run.recovering) return;
     run.recovering = true;
-    run.canvas.style.visibility = "hidden";
     let made: { backend: Backend; canvas: HTMLCanvasElement } | null = null;
     try {
       made = await createBackend(wrap, onLost, onRestored);
@@ -519,6 +528,7 @@ async function startRun(root: HTMLElement, signal: AbortSignal): Promise<boolean
   const onRestored = (): void => {
     if (!current) return;
     current.lost = false;
+    current.drawn = false; // the next draw shows the canvas again
     current.geoKey = "";
     current.rasterKey = "";
     reset();
@@ -596,7 +606,7 @@ export function hookView(): HookView | null {
   const run = live;
   if (!run || !run.drawn) return null;
   return {
-    backend: run.backend,
+    get backend() { return run.backend; }, // looked up on every use: a recovery replaces it
     scene(tf) {
       const m = measure(run, tf === undefined ? "auto" : cellFor(run, tf));
       if (!applyGeometry(run, m)) throw new Error("the canvas cannot hold this page");
