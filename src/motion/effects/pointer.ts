@@ -423,21 +423,24 @@ export function start(root: HTMLElement, signal: AbortSignal): Promise<void> {
     sp.T = 0;
   }
   function startArrows(): void {
-    // Without `linear()` there is no baked spring: the arrow rests, as it does in the other still cases.
-    if (!CSS.supports("animation-timing-function", "linear(0, 1)")) return;
+    // Without `linear()` there is no baked spring: the arrow becomes instant (A-4), 4 px on hover or focus and 0 off them.
+    const smooth = CSS.supports("animation-timing-function", "linear(0, 1)");
     for (const el of root.querySelectorAll<SVGElement>("[data-fx~=arrow]")) {
       const row = el.closest<HTMLElement>("a") ?? el.parentElement;
       if (!row) continue;
       const sp = createSpring(el, ARROW_SPRING.k, ARROW_SPRING.c);
       arrows.push(sp);
-      let hover = false;
-      let focus = false;
+      // Tier 1 can start with the pointer already over the row (Play after Pause, or reduced motion switched off), when no
+      // pointerenter will come: read the state, and show the 4 px the stylesheet was holding with no jump to 0 (DV-02.4, A-4).
+      let hover = row.matches(":hover");
+      let focus = row.matches(":focus-visible");
       let tap = false;
+      if (hover || focus) snap(sp, ARROW_TRAVEL);
       // A touch tap shows the arrow at once (DV-02.5 phone column): no spring.
       const aim = (instant: boolean): void => {
         const to = hover || focus || tap ? ARROW_TRAVEL : 0;
         if (to === sp.target) return;
-        if (instant) snap(sp, to);
+        if (instant || !smooth) snap(sp, to);
         else retarget(sp, to);
       };
       const on = { signal };

@@ -287,6 +287,30 @@ for (const engine of Object.keys(ENGINES)) {
       assert.equal(r.radius, "14px", "the corner radius is 14 px over a link");
     }));
 
+    test("pointer ring: a frame timestamp that precedes the last one does not move the ring (dt is never negative)", () => withPage("/", { pin: 5 }, async (page) => {
+      const e = await emptyPoint(page);
+      await page.mouse.move(e.x, e.y, { steps: 3 });
+      await page.waitForFunction(() => !!document.querySelector("[data-fx=ring]"));
+      const at = () => page.evaluate(() => document.querySelector("[data-fx=ring]").style.transform);
+      await page.waitForFunction(([x, y]) => { const r = document.querySelector("[data-fx=ring]").getBoundingClientRect(); return Math.abs(r.left + r.width / 2 - x) < 0.6 && Math.abs(r.top + r.height / 2 - y) < 0.6; }, [e.x, e.y]);
+      await sleep(800); // settled, with its velocity spent
+      const before = await at();
+      // From here every frame's timestamp is earlier than the one before it (rAF's timestamp can precede performance.now()).
+      await page.evaluate(() => {
+        const real = window.requestAnimationFrame;
+        let n = 0;
+        window.__realRaf = real;
+        window.requestAnimationFrame = (cb) => real.call(window, (t) => cb(t - 10000 - 16 * n++));
+      });
+      await page.mouse.move(e.x - 60, e.y, { steps: 3 });
+      await sleep(500);
+      assert.equal(await at(), before, "the ring stood still: a negative step moves it nowhere");
+      // The same page, frames honest again: the ring follows, so the stub was what held it.
+      await page.evaluate(() => { window.requestAnimationFrame = window.__realRaf; });
+      await page.mouse.move(e.x - 70, e.y, { steps: 3 });
+      await page.waitForFunction(([x, y]) => { const r = document.querySelector("[data-fx=ring]").getBoundingClientRect(); return Math.abs(r.left + r.width / 2 - x) < 0.6 && Math.abs(r.top + r.height / 2 - y) < 0.6; }, [e.x - 70, e.y], { timeout: 4000 });
+    }));
+
     test("magnetic primary button: within 5 by 4 px, a baked 0.6 s return, re-entry resumes the follow", () => withPage("/", { pin: 5 }, async (page) => {
       const offset = () => page.evaluate(() => {
         const el = document.querySelector("[data-fx~=magnet]");
@@ -450,6 +474,51 @@ for (const engine of Object.keys(ENGINES)) {
       await touch("pointerleave");
       a = await arrowState(page);
       assert.ok(Math.abs(a.x) < 0.01 && (await running(page)) === 0, `the release returns at once: ${JSON.stringify(a)}`);
+    }));
+
+    test("404 link-row arrow: Play with the pointer already over a row keeps the arrow at 4 px", () => withPage("/404.html", { pin: 0 }, async (page) => {
+      // The pointer enters while tier 1 is stopped, so no pointerenter reaches the restarted effects (DV-02.4, A-4: never jumps).
+      await pause(page);
+      const p = await pointIn(page, ".row", 0.5, 0.5);
+      await page.mouse.move(p.x, p.y, { steps: 3 });
+      let a = await arrowState(page);
+      assert.ok(Math.abs(a.x - 4) < 0.01 && a.animations === 0, `hover while paused: ${JSON.stringify(a)}`);
+      // Play from the keyboard: the pointer stays where it is, and the focus moves without scrolling the row away.
+      await page.evaluate(() => document.querySelector(".pause").focus({ preventScroll: true }));
+      await page.keyboard.press("Enter");
+      await page.waitForFunction(() => !document.documentElement.dataset.motion && Number(document.documentElement.dataset.tier) >= 1);
+      assert.equal(await page.evaluate(() => document.querySelector(".row").matches(":hover")), true, "the pointer is still over the row");
+      for (const when of ["at once", "a frame later", "frames later", "later"]) {
+        if (when === "a frame later") await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => r())));
+        if (when === "frames later") await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(() => r())))));
+        if (when === "later") await sleep(400);
+        a = await arrowState(page);
+        assert.ok(Math.abs(a.x - 4) < 0.01, `after Play, ${when}: ${JSON.stringify(a)}`);
+      }
+      assert.equal(await running(page), 0, "no spring runs while the arrow holds 4 px");
+      await page.mouse.move(p.x + 20, p.y, { steps: 3 });
+      await sleep(200);
+      assert.ok(Math.abs((await arrowState(page)).x - 4) < 0.01, "moving inside the row leaves the arrow at 4 px");
+      await away(page);
+      await page.waitForFunction(() => { const m = /^matrix\(([^)]*)\)$/.exec(getComputedStyle(document.querySelector("[data-fx~=arrow]")).transform); return !m || Number(m[1].split(",")[4]) < 0.15; }, undefined, { timeout: 2000 }); // the spring back
+    }));
+
+    test("404 link-row arrow: without linear() support it becomes instant, 4 px on hover and focus and 0 off them (A-4)", () => withPage("/404.html", { pin: 0, init: `{ const supports = CSS.supports.bind(CSS); CSS.supports = (...a) => (a.join(" ").includes("linear(") ? false : supports(...a)); }` }, async (page) => {
+      assert.equal(await page.evaluate(() => CSS.supports("animation-timing-function", "linear(0, 1)")), false, "the stub hides linear()");
+      const p = await pointIn(page, ".row", 0.5, 0.5);
+      await page.mouse.move(p.x, p.y, { steps: 3 });
+      let a = await arrowState(page);
+      assert.ok(Math.abs(a.x - 4) < 0.01 && (await running(page)) === 0, `hover: ${JSON.stringify(a)}`);
+      await away(page);
+      a = await arrowState(page);
+      assert.ok(Math.abs(a.x) < 0.01 && (await running(page)) === 0, `away: ${JSON.stringify(a)}`);
+      await page.keyboard.press("Tab");
+      await page.focus(".row");
+      a = await arrowState(page);
+      assert.ok(Math.abs(a.x - 4) < 0.01 && (await running(page)) === 0, `focus: ${JSON.stringify(a)}`);
+      await page.evaluate(() => document.activeElement.blur());
+      a = await arrowState(page);
+      assert.ok(Math.abs(a.x) < 0.01 && (await running(page)) === 0, `blur: ${JSON.stringify(a)}`);
     }));
 
     // ---- a live step: the rank rules apply while the page runs (A-3, DV-01.1), not just at load -------------------------
