@@ -304,7 +304,11 @@ for (const engine of Object.keys(ENGINES)) {
       });
       await page.mouse.move(e.x - 60, e.y, { steps: 3 });
       await sleep(500);
-      assert.equal(await at(), before, "the ring stood still: a negative step moves it nowhere");
+      // A ring still creeping the last few hundredths of a pixel into rest may move that much; a step back moves it by tens.
+      const num = (t) => t.match(/-?[\d.]+/g).map(Number);
+      const [bx, by] = num(before);
+      const [ax, ay] = num(await at());
+      assert.ok(Math.abs(ax - bx) < 0.5 && Math.abs(ay - by) < 0.5, `the ring stood still: a negative step moves it nowhere (${before} then ${await at()})`);
       // The same page, frames honest again: the ring follows, so the stub was what held it.
       await page.evaluate(() => { window.requestAnimationFrame = window.__realRaf; });
       await page.mouse.move(e.x - 70, e.y, { steps: 3 });
