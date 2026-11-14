@@ -85,7 +85,7 @@ const rows = [
   },
   {
     name: "card depth parallax", rank: 5, path: "/",
-    async hover() {},
+    async hover(page) { await page.evaluate(() => scrollTo({ top: 40, behavior: "instant" })); }, // nothing moves until the page scrolls
     act: () => { const t = getComputedStyle(document.querySelector("[data-fx~=parallax]")).translate; return t !== "none" && Math.abs(parseFloat(t.split(" ")[1])) > 0.3; },
     rest: () => { const el = document.querySelector("[data-fx~=parallax]"); return el.style.translate === "" && getComputedStyle(el).translate === "none"; },
     async poke(page) { await page.evaluate(() => scrollTo({ top: scrollY + 300, behavior: "instant" })); },
@@ -221,8 +221,15 @@ for (const engine of Object.keys(ENGINES)) {
       assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector("[data-fx~=tilt]")).transform), "none");
     }));
 
+    test("card depth parallax: a page that has not scrolled is not touched (hydration and the tier 3 zones stay still)", () => withPage("/", { pin: 0 }, async (page) => {
+      await sleep(500);
+      const touched = await page.evaluate(() => [...document.querySelectorAll("[data-fx~=parallax], [data-fx~=tilt]")].filter((el) => el.hasAttribute("style")).length);
+      assert.equal(touched, 0, "no card carries an inline style before the first scroll or pointer move");
+    }));
+
     test("card depth parallax: within 6 px, follows the scroll", () => withPage("/", { pin: 4 }, async (page) => {
       const shift = () => page.evaluate(() => parseFloat(getComputedStyle(document.querySelector("[data-fx~=parallax]")).translate.split(" ")[1]));
+      await rows[1].hover(page);
       await page.waitForFunction(rows[1].act);
       await sleep(1100);
       const low = await shift();

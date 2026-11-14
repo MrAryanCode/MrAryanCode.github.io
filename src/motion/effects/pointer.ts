@@ -60,6 +60,8 @@ interface Card {
   /** Whether the tilt is engaged, being returned, or idle. */
   tilt: "idle" | "follow" | "return";
   parallax: boolean;
+  /** Whether the parallax has written to the card yet: not before the first scroll, so a page at rest is not touched. */
+  armed: boolean;
   rect: DOMRect | null;
   glare: HTMLElement | null;
   timer: number;
@@ -84,7 +86,7 @@ export function start(root: HTMLElement, signal: AbortSignal): Promise<void> {
   function card(el: HTMLElement): Card {
     let c = cards.get(el);
     if (!c) {
-      c = { el, base: baseTransition(el), tilt: "idle", parallax: false, rect: null, glare: null, timer: 0, centreY: 0, shift: 0 };
+      c = { el, base: baseTransition(el), tilt: "idle", parallax: false, armed: false, rect: null, glare: null, timer: 0, centreY: 0, shift: 0 };
       cards.set(el, c);
     }
     return c;
@@ -95,7 +97,7 @@ export function start(root: HTMLElement, signal: AbortSignal): Promise<void> {
     if (c.base) parts.push(c.base);
     if (c.tilt === "follow") parts.push(TILT_FOLLOW);
     else if (c.tilt === "return") parts.push(TILT_RETURN);
-    if (c.parallax) parts.push(PARALLAX_CATCH_UP);
+    if (c.parallax && c.armed) parts.push(PARALLAX_CATCH_UP);
     c.el.style.transition = parts.join(", ");
   }
 
@@ -186,6 +188,12 @@ export function start(root: HTMLElement, signal: AbortSignal): Promise<void> {
       const shift = clamp((c.centreY - scrollY - half) / innerHeight, -1, 1) * PARALLAX_MAX;
       if (Math.abs(shift - c.shift) < 0.05) continue;
       c.shift = shift;
+      if (!c.armed) {
+        // The catch-up transition is in place, and flushed, before the first offset is written, so the first scroll eases in.
+        c.armed = true;
+        writeTransition(c);
+        void getComputedStyle(c.el).translate;
+      }
       c.el.style.translate = `0 ${shift.toFixed(2)}px`;
     }
   }
@@ -203,19 +211,21 @@ export function start(root: HTMLElement, signal: AbortSignal): Promise<void> {
     for (const el of root.querySelectorAll<HTMLElement>("[data-fx~=parallax]")) {
       const c = card(el);
       c.parallax = true;
-      writeTransition(c);
     }
-    measureParallax();
-    parallaxFrame();
+    measureParallax(); // measured now; nothing is written until the page scrolls
   }
 
   function stopParallax(): void {
     for (const c of cards.values()) {
       if (!c.parallax) continue;
+      const touched = c.armed;
       c.parallax = false;
+      c.armed = false;
       c.shift = 0;
-      writeTransition(c);
-      c.el.style.translate = "";
+      if (touched) {
+        writeTransition(c);
+        c.el.style.translate = "";
+      }
     }
   }
 
@@ -470,7 +480,7 @@ export function start(root: HTMLElement, signal: AbortSignal): Promise<void> {
     for (const c of cards.values()) c.rect = null;
     if (parallaxOn) {
       measureParallax();
-      queueParallax();
+      if ([...cards.values()].some((c) => c.armed)) queueParallax(); // a page that has not scrolled is left alone
     }
   });
   resized.observe(document.body);
