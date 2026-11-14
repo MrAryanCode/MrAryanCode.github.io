@@ -1,0 +1,644 @@
+/*
+ * Style system for all four pages (design.md DV-01.1, DV-02.1 to DV-02.6; D-038, D-039, D-040).
+ *
+ * Fonts: every font-family below is var(--font-sans), var(--font-mono) or inherit. The font-face rules and
+ * the two variables live in src/fonts.css. Weights used: Geist 400/500/600, Geist Mono 400/500.
+ *
+ * Class contract for the page tasks (T-010 to T-013) and the effect tasks (T-018, T-019, T-031, T-033, T-034):
+ *   layout      #root > header | main | footer, .skip, .visually-hidden, .muted
+ *   header      .site-nav, .pause (the pause button), [data-fx="progress"]
+ *   home        .hero, .role, .availability, .actions, .btn, .btn-primary, .section, .heading-row, .index,
+ *               .cards, .panel, .panel-card, .card-summary, .skills, .tiles, .tile, .tile-label, .tile-value, .tile-of,
+ *               .checks, .failed-note, .footer-groups, .footer-stamp
+ *   band        .band (full-bleed header band of the case study and the report), .pin, .links-row
+ *   case study  .reading, .ref-list, .ref, .ref-statement, .ref-path
+ *   report      .check, .check-head, .check-note, .tiles, .tile, .defined-in, .table-scroll, table.perf
+ *   404         .not-found, .page-list, .row, .row-label, .row-arrow
+ * Texture: the still look (paused, reduced motion, no scripts, rank 7) is body::before and body::after below. A live
+ * canvas covers it. Quiet zones, tilt, magnetism, the pointer ring and the scan bar are the effect tasks'.
+ */
+
+/* ---------- Tokens: light first, dark under prefers-color-scheme ---------- */
+:root {
+  color-scheme: light dark;
+
+  --bg: #F1F1EC;
+  --surface: #FBFBF8;
+  --text: #0D0F11;
+  --text-2: #4F545C;
+  --accent: #4E7D00;
+  --action-bg: #0D0F11;
+  --action-fg: #D4F76A;
+  --action-hover: #22262B;
+  --link: #3A6400;
+  --link-visited: #5B5410;
+  --focus: #0B7A80;
+  --border: #D6D8D0;
+  --border-ctl: #7A7F87;
+  --tick: #B9BDB3;
+  --quiet: #D8DBD1;
+  --tex-base: #E0E2D9;
+  --hot: #2B3036;
+  --spark: #5E8F00;
+  --glare: rgb(78 125 0 / 10%);
+
+  --content-max: 1120px;
+  --gutter: 20px;
+  --section-gap: 64px;
+  --band-pad-y: 48px;
+  --band-pad-b: 44px;
+  --panel-pad: 24px;
+  --panel-gap: 16px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #08090B;
+    --surface: #101216;
+    --text: #EDEFF2;
+    --text-2: #9DA3AE;
+    --accent: #C6F432;
+    --action-bg: #C6F432;
+    --action-fg: #08090B;
+    --action-hover: #D9FF66;
+    --link: #C6F432;
+    --link-visited: #A9D96B;
+    --focus: #5CE1E6;
+    --border: #23262D;
+    --border-ctl: #646A76;
+    --tick: #3A3F48;
+    --quiet: #1C2128;
+    --tex-base: #15191E;
+    --hot: #4A6122;
+    --spark: #C6F432;
+    --glare: rgb(255 255 255 / 7%);
+  }
+}
+
+@media (min-width: 480px) { :root { --gutter: 32px; } }
+@media (min-width: 960px) {
+  :root { --section-gap: 104px; --band-pad-y: 72px; --band-pad-b: 60px; --panel-pad: 34px; --panel-gap: 20px; }
+}
+@media (min-width: 1200px) { :root { --gutter: 40px; } }
+
+/* ---------- Base ---------- */
+html {
+  background-color: var(--bg);
+  color: var(--text);
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  position: relative;
+  min-height: 100vh;
+  min-height: 100svh;
+  margin: 0;
+  background-color: transparent;
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 17px;
+  font-weight: 400;
+  line-height: 1.6;
+  --pad-x: max(var(--gutter), calc((100% - var(--content-max)) / 2));
+}
+
+/* The still look, whole page: a calm 1/64 texture, one 4px pixel (a conic quadrant, no image file) in each 32px tile.
+   It is fixed to the viewport, and the first-screen layer below is in flow, never position: absolute, because axe
+   skips fixed and relative pseudo-elements but gives up measuring text contrast under an absolute one. */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  pointer-events: none;
+  background-image: conic-gradient(from 270deg at 4px 4px, var(--tex-base) 0 25%, transparent 25% 100%);
+  background-size: 32px 32px;
+  background-position: 12px 4px;
+}
+
+/* The still look of the first screen: six 16px pixel layers at Bayer offsets, each inside a shrinking hard-edged
+   ellipse, so the density steps up from 1/16 to 6/16 toward the right. Each pixel layer is covered outside its
+   own ellipse by an opaque layer in the page colour; the top layer repeats the calm texture. The brightest pixel
+   is --quiet, the colour every text contrast is measured against. */
+body::before {
+  content: "";
+  display: block;
+  position: relative;
+  height: 100vh;
+  height: 100svh;
+  margin-bottom: -100vh;
+  margin-bottom: -100svh;
+  z-index: -1;
+  pointer-events: none;
+  --cx: 82%;
+  --cy: 46%;
+  background-color: var(--bg);
+  background-image:
+    conic-gradient(from 270deg at 4px 4px, var(--tex-base) 0 25%, transparent 25% 100%),
+    radial-gradient(ellipse 80% 92% at var(--cx) var(--cy), transparent 0 100%, var(--bg) 100%),
+    conic-gradient(from 270deg at 4px 4px, var(--quiet) 0 25%, transparent 25% 100%),
+    radial-gradient(ellipse 66% 78% at var(--cx) var(--cy), transparent 0 100%, var(--bg) 100%),
+    conic-gradient(from 270deg at 4px 4px, var(--quiet) 0 25%, transparent 25% 100%),
+    radial-gradient(ellipse 52% 64% at var(--cx) var(--cy), transparent 0 100%, var(--bg) 100%),
+    conic-gradient(from 270deg at 4px 4px, var(--quiet) 0 25%, transparent 25% 100%),
+    radial-gradient(ellipse 40% 52% at var(--cx) var(--cy), transparent 0 100%, var(--bg) 100%),
+    conic-gradient(from 270deg at 4px 4px, var(--quiet) 0 25%, transparent 25% 100%),
+    radial-gradient(ellipse 29% 40% at var(--cx) var(--cy), transparent 0 100%, var(--bg) 100%),
+    conic-gradient(from 270deg at 4px 4px, var(--quiet) 0 25%, transparent 25% 100%),
+    radial-gradient(ellipse 19% 28% at var(--cx) var(--cy), transparent 0 100%, var(--bg) 100%),
+    conic-gradient(from 270deg at 4px 4px, var(--quiet) 0 25%, transparent 25% 100%);
+  background-size:
+    32px 32px, 100% 100%,
+    16px 16px, 100% 100%,
+    16px 16px, 100% 100%,
+    16px 16px, 100% 100%,
+    16px 16px, 100% 100%,
+    16px 16px, 100% 100%,
+    16px 16px;
+  background-position:
+    12px 4px, 0 0,
+    0 0, 0 0,
+    8px 8px, 0 0,
+    8px 0, 0 0,
+    0 8px, 0 0,
+    4px 4px, 0 0,
+    12px 12px;
+  background-repeat:
+    repeat, no-repeat,
+    repeat, no-repeat,
+    repeat, no-repeat,
+    repeat, no-repeat,
+    repeat, no-repeat,
+    repeat, no-repeat,
+    repeat;
+}
+
+@media (max-width: 759.98px) {
+  body::before { --cx: 92%; --cy: 22%; }
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+button, input, select, textarea { font-family: inherit; }
+
+[hidden] { display: none !important; }
+
+h1, h2, h3, h4, h5, h6 { margin: 0; font-weight: 600; text-wrap: balance; }
+p { margin: 0 0 1em; }
+b, strong { font-weight: 600; }
+th { font-weight: 500; text-align: left; }
+small { font-size: 0.8em; }
+.muted, small { color: var(--text-2); }
+
+.skip { position: absolute; left: -999px; top: 0; z-index: 10; padding: 12px 16px; background: var(--surface); color: var(--text); }
+.skip:focus { left: 0; }
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Focus: a 2px ring with a 3px offset (3:1 or better against bg, surface and the quiet colour). */
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
+
+/* ---------- Links: a resting 1px underline at 38%, a 1.5px full-colour line that draws on hover or focus ---------- */
+a {
+  color: var(--link);
+  text-decoration: none;
+  background-image:
+    linear-gradient(currentColor, currentColor),
+    linear-gradient(color-mix(in srgb, currentColor 38%, transparent), color-mix(in srgb, currentColor 38%, transparent));
+  background-repeat: no-repeat;
+  /* Resting: the drawn line has zero width and sits at the right, so it retracts to the right on leave. */
+  background-position: right bottom, left bottom;
+  background-size: 0% 1.5px, 100% 1px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  padding-bottom: 1px;
+  /* Only the size is transitioned: the anchor side flips at once, so the line grows from the left and leaves to the right. */
+  transition: background-size 0.42s ease-in-out;
+}
+a:visited { color: var(--link-visited); }
+/* Links with a 44px target: the padding makes the box 44px and the lines sit on the content box, so the underline is
+   under the text and not at the bottom of the box. The identity link (two lines, taller than 44px) needs no padding. */
+.site-nav a,
+dd a,
+.tile a,
+.links-row a {
+  padding-block: calc((44px - 1lh) / 2);
+  background-origin: content-box;
+}
+a:hover,
+a:focus-visible {
+  background-position: left bottom, left bottom;
+  background-size: 100% 1.5px, 100% 1px;
+}
+
+/* Reduced motion and a paused visit: every transition is instant (the underline included). */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition-duration: 0s !important; transition-delay: 0s !important; }
+}
+html[data-motion="paused"] *,
+html[data-motion="paused"] *::before,
+html[data-motion="paused"] *::after { transition-duration: 0s !important; transition-delay: 0s !important; }
+
+/* ---------- Layout frame ---------- */
+#root > header,
+#root > footer { padding-inline: var(--pad-x); }
+#root > main { container: page / inline-size; counter-reset: section; display: block; }
+#root > main > * { padding-inline: var(--pad-x); }
+
+#root > header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 24px;
+  min-height: 114px;
+  padding-block: 12px;
+}
+#root > header a,
+.site-nav a { display: inline-flex; align-items: center; min-height: 44px; }
+/* The identity link: the name dominates, the handle under it recedes (DS-01). */
+#root > header a small { color: var(--text-2); font-size: 0.8em; }
+.site-nav { display: inline-flex; flex-wrap: wrap; gap: 6px 24px; }
+@media (min-width: 480px) {
+  #root > header { min-height: 80px; flex-wrap: nowrap; }
+}
+
+#root > footer {
+  margin-top: 56px;
+  padding-block: 0 32px;
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+#root > footer p { margin: 0.25rem 0; }
+.footer-groups { display: grid; gap: 28px; margin-top: 28px; font-size: 12.5px; }
+.footer-stamp { margin-top: 40px; font-size: 11.5px; line-height: 1.4; }
+.footer-stamp small { font-size: inherit; }
+@media (min-width: 760px) {
+  .footer-groups { grid-template-columns: 1fr 1fr; }
+}
+
+/* Pause button: a mono pill with a fixed-width label cell. The icon morph is T-019's. */
+.pause {
+  display: inline-grid;
+  grid-template-columns: 16px auto;
+  align-items: center;
+  column-gap: 8px;
+  min-height: 44px;
+  padding: 0 16px;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border-ctl);
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+/* The pause button's slot holds its space from first paint, only where script runs motion (DS-01). */
+.pause-slot { display: none; }
+@media (scripting: enabled) and (prefers-reduced-motion: no-preference) {
+  .pause-slot { display: block; min-width: calc(58px + 12ch); min-height: 44px; font: 500 13px var(--font-mono); }
+}
+
+/* Reading progress line: hidden until T-033 drives it, and with the still look. */
+[data-fx="progress"] {
+  position: fixed;
+  inset: 0 0 auto 0;
+  z-index: 20;
+  height: 2px;
+  background: var(--accent);
+  transform: scaleX(0);
+  transform-origin: left;
+  pointer-events: none;
+}
+html[data-motion="paused"] [data-fx="progress"] { display: none; }
+@media (prefers-reduced-motion: reduce) { [data-fx="progress"] { display: none; } }
+
+/* ---------- Type scale ---------- */
+main h1,
+.band h1 { font-family: var(--font-mono); font-weight: 500; line-height: 1; overflow-wrap: break-word; }
+main h1 { font-size: clamp(34px, 11.4cqi, 104px); letter-spacing: -0.055em; margin-block: 0 24px; }
+main h2 {
+  font-family: var(--font-sans);
+  font-size: clamp(28px, 1.2rem + 1.4cqi, 40px);
+  line-height: 1.1;
+  letter-spacing: -0.028em;
+}
+h3 { font-family: var(--font-mono); font-weight: 500; font-size: 22px; line-height: 1.25; }
+.skills h3 { font-family: var(--font-sans); font-weight: 600; font-size: 20px; }
+code, kbd, samp, pre { font-family: var(--font-mono); font-size: 0.9em; }
+
+/* ---------- Sections and heading rows ---------- */
+#root > main > section { padding-block: var(--section-gap) 0; }
+.heading-row { display: flex; align-items: baseline; gap: 14px; margin-bottom: 32px; position: relative; }
+.index {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--text-2);
+}
+.section { counter-increment: section; }
+.index::before { content: counter(section, decimal-leading-zero) / ""; }
+
+/* ---------- Home: first screen ---------- */
+.hero { display: flex; flex-direction: column; justify-content: center; min-height: calc(100svh - 114px); padding-block: 56px; }
+.role {
+  max-width: 22em;
+  margin: 0 0 20px;
+  font-size: clamp(20.7px, 17px + 0.953cqi, 30px);
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+}
+.availability { margin: 0 0 32px; max-width: 40em; color: var(--text-2); font-family: var(--font-mono); font-size: 13px; line-height: 1.55; }
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: 16px 28px; }
+@media (min-width: 480px) { #root > main > .hero { min-height: calc(100svh - 80px); } }
+@media (min-width: 960px) { .hero { padding-block: 72px; } }
+
+/* Buttons: the lime pill (radius 12, 52 px; 56 px in "Working with me"). Magnetism is T-031's. */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 52px;
+  padding: 0 24px;
+  background-image: none;
+  border-radius: 12px;
+  font-weight: 500;
+  font-size: 17px;
+  /* The fill fades only on hover and focus (below), so a colour-scheme switch repaints the button at once and
+     axe never samples a half-faded fill. */
+  transition: transform 0.12s ease-out;
+}
+.btn-primary,
+.btn-primary:visited { background-color: var(--action-bg); color: var(--action-fg); }
+.btn-primary:hover,
+.btn-primary:focus-visible { background-color: var(--action-hover); background-image: none; transition: background-color 0.18s ease-out, transform 0.12s ease-out; }
+.btn-primary:active { transform: translateY(1px) scale(0.985); }
+#working .btn { min-height: 56px; }
+
+/* ---------- Panels, cards, tiles, checks ---------- */
+.panel {
+  position: relative;
+  padding: var(--panel-pad);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+}
+.panel > * { position: relative; }
+.panel:not(.panel-plain)::before,
+.band::before {
+  content: "";
+  position: absolute;
+  inset: 12px;
+  pointer-events: none;
+  --t: var(--tick);
+  background-image:
+    linear-gradient(var(--t), var(--t)), linear-gradient(var(--t), var(--t)),
+    linear-gradient(var(--t), var(--t)), linear-gradient(var(--t), var(--t)),
+    linear-gradient(var(--t), var(--t)), linear-gradient(var(--t), var(--t)),
+    linear-gradient(var(--t), var(--t)), linear-gradient(var(--t), var(--t));
+  background-size: 10px 1px, 1px 10px, 10px 1px, 1px 10px, 10px 1px, 1px 10px, 10px 1px, 1px 10px;
+  background-position: left top, left top, right top, right top, left bottom, left bottom, right bottom, right bottom;
+  background-repeat: no-repeat;
+}
+.band::before { inset: var(--band-pad-y) var(--pad-x) var(--band-pad-b); }
+.panel-card { transition: border-color 0.2s ease-out; }
+.panel-card:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
+.card-summary { color: var(--text-2); max-width: 40em; }
+
+.cards { display: grid; gap: var(--panel-gap); }
+.skills { display: grid; gap: var(--panel-gap); }
+@container page (min-width: 900px) {
+  .cards { grid-template-columns: 1fr 1fr; }
+  .skills { grid-template-columns: 1.7fr 1fr; }
+}
+
+/* Value tiles (home facts and the report): label above, tabular mono value. */
+.tiles { display: flex; flex-wrap: wrap; gap: 1px; background: var(--border); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+.tile { flex: 1 1 150px; min-width: 0; padding: 14px 16px; background: var(--surface); }
+.tile-label {
+  display: block;
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.3;
+  overflow-wrap: break-word;
+  hyphens: auto;
+}
+.tile-value, [data-fact] {
+  font-family: var(--font-mono);
+  font-weight: 400;
+  font-size: 19px;
+  line-height: 1.3;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: break-word;
+}
+.tile-value { display: block; margin-top: 6px; font-size: 26px; line-height: 1.1; }
+.tile-of { color: var(--text-2); font-size: 14px; }
+@container page (min-width: 480px) { .tile-value { font-size: 30px; } }
+@container page (max-width: 479.98px) {
+  .tiles { gap: 1px; }
+  .tile { flex: 1 1 calc(50% - 1px); padding: 12px 14px 14px; }
+}
+@container page (max-width: 379.98px) {
+  .home-facts .tile { flex-basis: 100%; }
+}
+
+dd a, .tile a { display: inline-flex; align-items: center; min-height: 44px; }
+dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 20px; margin: 0 0 1em; }
+dt { color: var(--text-2); font-family: var(--font-mono); font-size: 13px; }
+dd { margin: 0; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+.checks { list-style: none; margin: 0; padding: 0; }
+.checks li { position: relative; padding-left: 28px; margin-bottom: 8px; }
+.checks li > svg { position: absolute; left: 0; top: 0.35em; width: 18px; height: 18px; fill: none; stroke: var(--accent); stroke-width: 2; }
+
+.failed-note { display: flex; gap: 10px; align-items: flex-start; margin: 0 0 8px; color: var(--text-2); font-family: var(--font-mono); font-size: 13px; line-height: 1.55; }
+
+/* ---------- Header band (case study and report, DV-02.1) ---------- */
+/* The second selector outranks `#root > main > section`, so a band that is a section keeps its own padding. */
+.band,
+#root > main > section.band {
+  position: relative;
+  padding-block: var(--band-pad-y) var(--band-pad-b);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.band > * { position: relative; }
+.band h1 { font-size: clamp(40px, 8.4cqi, 96px); letter-spacing: -0.05em; margin: 0 0 20px; }
+.band .lead,
+.lead { max-width: 30em; margin: 0 0 20px; font-size: clamp(19px, 17.5px + 0.4cqi, 26px); line-height: 1.35; }
+.pin { max-width: 62ch; margin: 0 0 20px; color: var(--text-2); font-family: var(--font-mono); font-size: 13.5px; line-height: 1.65; }
+.links-row { display: flex; flex-wrap: wrap; gap: 0 28px; margin: 0; padding: 0; list-style: none; font-size: 16px; font-weight: 500; }
+.links-row a { display: inline-flex; align-items: center; min-height: 44px; }
+
+/* ---------- Case study reading column (DV-02.2) ---------- */
+.reading { max-width: calc(44rem + 2 * var(--pad-x)); margin-inline: 0; }
+#root > main > .reading { padding-top: 24px; }
+.reading h2 { font-size: clamp(24px, 1.1rem + 1.2cqi, 32px); }
+.reading > section + section { margin-top: 48px; }
+@media (min-width: 960px) { .reading > section + section { margin-top: 64px; } }
+.reading .heading-row { margin-bottom: 18px; }
+.ref-list { list-style: none; margin: 0; padding: 0; }
+.ref { padding: 18px 0 16px; border-top: 1px solid var(--border); }
+.ref:first-child { border-top: 0; }
+.ref-statement { max-width: 40em; margin: 0 0 8px; font-size: 18px; line-height: 1.6; }
+.ref-path {
+  position: relative;
+  display: inline-flex;
+  gap: 8px;
+  margin-left: 14px;
+  font-family: var(--font-mono);
+  font-size: 14px;
+  line-height: 1.55;
+}
+.ref-path::before {
+  content: "";
+  position: absolute;
+  left: -14px;
+  bottom: 50%;
+  width: 10px;
+  height: 22px;
+  border-left: 1px solid var(--border-ctl);
+  border-bottom: 1px solid var(--border-ctl);
+  pointer-events: none;
+}
+
+/* Paths wrap at any character and are never truncated: the only rule that lets a line break at any character. */
+.defined-in a,
+.ref-path {
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}
+
+/* ---------- Report (DV-02.3) ---------- */
+.check { display: grid; gap: 18px; margin-bottom: var(--panel-gap); }
+.check-head { min-width: 0; }
+.check-head h2 { font-size: clamp(21px, 1rem + 1cqi, 26px); }
+.check-note { margin: 10px 0 0; color: var(--text-2); font-size: 15px; line-height: 1.5; }
+.check > .tiles,
+.check > .table-scroll,
+.defined-in { min-width: 0; }
+@container page (min-width: 960px) {
+  .check { grid-template-columns: 4fr 8fr; column-gap: 40px; row-gap: 24px; }
+  .check > .table-scroll, .check > .defined-in { grid-column: 1 / -1; }
+}
+.defined-in {
+  display: flex;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.defined-in a { min-height: 24px; }
+
+.table-scroll { overflow-x: auto; }
+table.perf { width: 100%; border-collapse: collapse; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+table.perf caption { padding-bottom: 8px; color: var(--text-2); font-size: 12.5px; text-align: left; }
+table.perf th { color: var(--text-2); font-size: 12.5px; font-weight: 400; padding: 8px 12px; border-bottom: 1px solid var(--border); }
+table.perf tbody th { color: var(--text); font-size: 14px; font-weight: 500; }
+table.perf td { padding: 8px 12px; font-size: 17px; text-align: right; border-bottom: 1px solid var(--border); }
+table.perf th:not(:first-child) { text-align: right; }
+@container page (max-width: 479.98px) {
+  table.perf thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  table.perf, table.perf tbody, table.perf tr, table.perf th, table.perf td { display: block; width: auto; }
+  table.perf tr { padding: 10px 0; border-bottom: 1px solid var(--border); }
+  table.perf tbody th, table.perf td { padding: 2px 0; border: 0; text-align: left; }
+  table.perf td { display: flex; justify-content: space-between; gap: 12px; }
+  table.perf td::before { content: attr(data-label) / ""; color: var(--text-2); font-size: 12.5px; }
+}
+
+/* ---------- 404 (DV-02.4): the phone/laptop switch is the 760 px system breakpoint ---------- */
+.not-found { display: flex; flex-direction: column; justify-content: center; min-height: calc(100svh - 114px); padding-block: 56px; }
+.not-found .role { margin-bottom: 32px; }
+.page-list { list-style: none; margin: 0; padding: 0; max-width: 30rem; }
+.page-list li { border-top: 1px solid var(--border); }
+.page-list li:last-child { border-bottom: 1px solid var(--border); }
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 60px;
+  background-image: none;
+  color: var(--text);
+  font-size: clamp(19px, 17.2px + 0.46cqi, 22px);
+  font-weight: 500;
+}
+.row:visited { color: var(--text); }
+/* The underline draws on the label, not across the arrow. */
+.row-label {
+  background-image:
+    linear-gradient(var(--link), var(--link)),
+    linear-gradient(color-mix(in srgb, var(--link) 38%, transparent), color-mix(in srgb, var(--link) 38%, transparent));
+  background-repeat: no-repeat;
+  background-position: right bottom, left bottom;
+  background-size: 0% 1.5px, 100% 1px;
+  padding-bottom: 1px;
+  transition: background-size 0.42s ease-in-out;
+}
+.row:hover .row-label,
+.row:focus-visible .row-label { background-position: left bottom, left bottom; background-size: 100% 1.5px, 100% 1px; }
+.row-arrow { flex: none; width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; }
+/* Paused and reduced motion: the arrow shows its 4 px at once (DV-02.5, A-4); running, it is the pointer effects' spring. */
+html[data-motion="paused"] .row:hover .row-arrow,
+html[data-motion="paused"] .row:focus-visible .row-arrow { transform: translateX(4px); }
+@media (prefers-reduced-motion: reduce) {
+  .row:hover .row-arrow,
+  .row:focus-visible .row-arrow { transform: translateX(4px); }
+}
+@media (min-width: 760px) {
+  .not-found { min-height: calc(100svh - 80px); }
+}
+@container page (min-width: 760px) {
+  .not-found .role { max-width: 22em; }
+}
+
+/* ---------- Cross-document view transitions (D-041, D-061): the morph timing (the opt-in is inserted by the head script in index.html) ---------- */
+::view-transition-group(case-card),
+::view-transition-group(case-title),
+::view-transition-group(case-summary) {
+  animation-duration: 760ms;
+  animation-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+@keyframes vt-lift {
+  0% { transform: scale(1); }
+  18% { transform: scale(1.02); }
+  50% { transform: scale(1.02); }
+  100% { transform: scale(1); }
+}
+::view-transition-image-pair(case-card) {
+  animation: vt-lift 760ms cubic-bezier(0.2, 0, 0, 1) both;
+}
+/* Title pair (T-037): both images follow the group's height, so the glyphs grow with the box instead of with its
+   width. The old h3 line box is 1.25 x its font size and the new h1's is 1 x, hence 125% and the -12.5% half-leading;
+   --vt-title-lines (set by the head script) is the number of lines the h1 wraps to. */
+::view-transition-old(case-title),
+::view-transition-new(case-title) {
+  width: auto;
+  height: 100%;
+}
+::view-transition-old(case-title) {
+  height: calc(125% / var(--vt-title-lines, 1));
+  inset-block-start: calc(-12.5% / var(--vt-title-lines, 1));
+}
+
+/* ---------- Skeleton probes (removed by T-017 and T-018 when they replace them) ---------- */
+canvas { display: block; background: var(--text-2); opacity: 0.2; }

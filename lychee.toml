@@ -1,0 +1,11 @@
+# Links gate. Run from the repository root; dist/ is the built site.
+no_progress = true
+index_files = ["index.html"]
+include_fragments = "anchor-only"
+max_retries = 3
+retry_wait_time = 2
+timeout = 20
+host_concurrency = 4
+host_request_interval = "250ms"
+accept = ["200..=299", "429"]
+exclude = ['^https://www\.linkedin\.com', '^https://github\.com/MrAryanCode/MrAryanCode\.github\.io/actions/runs/']

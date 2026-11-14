@@ -1,0 +1,27 @@
+{
+  "absent": [
+    { "text": "__T3_SEEK__" },
+    { "text": "seek-hook" },
+    { "text": "T3_FX_OVERRIDE" },
+    { "text": "T3_ALLOW_SOFTWARE" },
+    { "text": "setEffects" },
+    { "text": "heldByHook" },
+    { "text": "effectsMap" },
+    { "text": "lastCounts" },
+    { "text": "maxScroll" },
+    { "text": "__SEEK_HOOK__" },
+    { "regex": "[\"'`]fx[\"'`]|(^|[^-.A-Za-z0-9_])fx=" }
+  ],
+  "present": [
+    { "text": "__T3_SEEK__" },
+    { "text": "seek-hook" },
+    { "text": "T3_FX_OVERRIDE" },
+    { "text": "T3_ALLOW_SOFTWARE" },
+    { "text": "setEffects" },
+    { "text": "heldByHook" },
+    { "text": "effectsMap" },
+    { "text": "lastCounts" },
+    { "text": "maxScroll" },
+    { "regex": "[\"'`]fx[\"'`]|(^|[^-.A-Za-z0-9_])fx=" }
+  ]
+}
