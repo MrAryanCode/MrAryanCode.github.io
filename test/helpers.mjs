@@ -7,11 +7,16 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { chromium } from "playwright";
 
 export const root = dirname(dirname(fileURLToPath(import.meta.url)));
-export const API_PORT = 4611;
-export const SITE_PORT = 4612;
+// TEST_PORT_OFFSET (a non-negative integer, unset or empty means 0) is added to every fixed port below, so two runs on one
+// machine can serve at the same time. Unset, every port is exactly the number written here.
+const rawOffset = process.env.TEST_PORT_OFFSET;
+const PORT_OFFSET = rawOffset === undefined || rawOffset === "" ? 0 : /^\d+$/.test(rawOffset) ? Number(rawOffset) : NaN;
+if (!Number.isSafeInteger(PORT_OFFSET)) throw new Error(`TEST_PORT_OFFSET must be a non-negative integer, got "${rawOffset}"`);
+export const API_PORT = 4611 + PORT_OFFSET;
+export const SITE_PORT = 4612 + PORT_OFFSET;
 export const BASE = `http://127.0.0.1:${SITE_PORT}`;
 // The test-hook variant (scripts/build.mjs --mode test) is served on its own port, so it never shadows dist/.
-export const TEST_SITE_PORT = 4613;
+export const TEST_SITE_PORT = 4613 + PORT_OFFSET;
 export const TEST_BASE = `http://127.0.0.1:${TEST_SITE_PORT}`;
 export const dist = (...p) => join(root, "dist", ...p);
 export const distTest = (...p) => join(root, "dist-test", ...p);
