@@ -4,6 +4,7 @@
     { "text": "seek-hook" },
     { "text": "T3_FX_OVERRIDE" },
     { "text": "T3_ALLOW_SOFTWARE" },
+    { "text": "setEffects" },
     { "text": "__SEEK_HOOK__" },
     { "regex": "[\"'`]fx[\"'`]|(^|[^-.A-Za-z0-9_])fx=" }
   ],
@@ -12,6 +13,7 @@
     { "text": "seek-hook" },
     { "text": "T3_FX_OVERRIDE" },
     { "text": "T3_ALLOW_SOFTWARE" },
+    { "text": "setEffects" },
     { "regex": "[\"'`]fx[\"'`]|(^|[^-.A-Za-z0-9_])fx=" }
   ]
 }

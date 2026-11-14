@@ -58,7 +58,8 @@ const allowSoftwareRenderer = (browser) => {
 };
 // The re-request after a loss: window.__afterLoss is "again" (the real adapter), "null" (no adapter) or "fallback" (a
 // software adapter). The reply is delayed 300 ms so the hidden, lost canvas can be seen while it waits. window.__noGl2
-// refuses a WebGL2 context.
+// refuses a WebGL2 context. window.__swiftGl2 makes a WebGL2 context report a SwiftShader unmasked renderer, and
+// window.__swiftReads counts how often it was asked.
 const patchRequests = () => {
   // The device is destroyed from the page, as the platform would; the hook's own lose() holds the field's loop (it draws
   // only through the hook then), so a recovery could not draw.
@@ -87,6 +88,13 @@ const patchRequests = () => {
   const getContext = HTMLCanvasElement.prototype.getContext;
   HTMLCanvasElement.prototype.getContext = function (type, ...rest) {
     return type === "webgl2" && window.__noGl2 ? null : getContext.call(this, type, ...rest);
+  };
+  window.__swiftReads = 0;
+  const getParameter = WebGL2RenderingContext.prototype.getParameter;
+  WebGL2RenderingContext.prototype.getParameter = function (pname) {
+    if (pname !== 0x9246 || !window.__swiftGl2) return getParameter.call(this, pname); // 0x9246: UNMASKED_RENDERER_WEBGL
+    window.__swiftReads++;
+    return "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)";
   };
 };
 // Watches the field's canvases every frame: the visibility each showed when first seen, and whether the first one was
@@ -733,6 +741,22 @@ for (const E of ENGINES) {
         assert.equal(await page.evaluate(() => globalThis.__T3_SEEK__.layout().renderer.api), "webgl2");
         assert.equal(await canvases(page), 1);
         assert.equal(await page.evaluate(() => document.documentElement.dataset.tier), "3");
+        assert.deepEqual(errors, []);
+        await ctx.close();
+      });
+
+      // D-064 item 4: a re-requested software adapter is declined like a null adapter, recovery goes on to WebGL2, and that
+      // WebGL2's renderer says SwiftShader, so D-063 declines it too: the page ends on tier 2 with no canvas. Runs locally
+      // (the CI runner's own adapter is a fallback one, so the engine skips there with the D-064 message).
+      gpuTest("A-1 context loss: a software adapter on the re-request, then a SwiftShader WebGL2, ends on tier 2 with no canvas", async () => {
+        const { ctx, page, errors } = await openLoss();
+        await page.evaluate(() => { globalThis.T3_ALLOW_SOFTWARE = false; window.__swiftGl2 = true; });
+        await lose(page, "fallback");
+        await page.waitForFunction(() => document.documentElement.dataset.tier === "2", undefined, { timeout: 10000 });
+        assert.ok(await page.evaluate(() => window.__swiftReads) > 0, "the recovery asked the WebGL2 context for its renderer");
+        assert.equal(await canvases(page), 0, "no canvas stays");
+        assert.equal(await page.evaluate(() => document.documentElement.dataset.field), undefined);
+        assert.ok(await page.locator("h1").first().isVisible(), "the page still reads");
         assert.deepEqual(errors, []);
         await ctx.close();
       });

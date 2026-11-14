@@ -20,7 +20,7 @@ const reset = (): void => {
   budgetReset();
 };
 /** The number of reset() calls this module has made (the seek hook reads it; test builds only). */
-export const resetCalls = (): number => resets;
+export const resetCalls = (): number => (__SEEK_HOOK__ ? resets : 0);
 
 const REDUCED = "(prefers-reduced-motion: reduce)";
 const DARK = "(prefers-color-scheme: dark)";
@@ -73,10 +73,12 @@ interface Run {
 let kept: Run | null = null; // the field while paused: hidden, ready to resume
 let live: Run | null = null; // the field that is drawing, or the one the hook holds
 let playedThisLoad = false; // the 404 plays its formation on every load
+// The four below are read or written only by the seek hook's view (hookView); every use is under __SEEK_HOOK__, so the
+// production chunk keeps none of them (vite-test-only-module).
 let held = false; // the hook has taken over the drawing
 let effectsMap: ((e: Effects) => Effects) | null = null;
 let settle: (ok: boolean) => void = () => {};
-const settled = new Promise<boolean>((resolve) => { settle = resolve; });
+const settled = __SEEK_HOOK__ ? new Promise<boolean>((resolve) => { settle = resolve; }) : Promise.resolve(false);
 
 // ---- Page measuring ----
 
@@ -187,7 +189,7 @@ function measure(run: Run, cell: "auto" | number = "auto"): Measured {
     cta,
     col,
     mask,
-    effects: effectsMap ? effectsMap(base) : base,
+    effects: __SEEK_HOOK__ && effectsMap ? effectsMap(base) : base,
   };
   const info: LayoutInfo = {
     page: run.route,
@@ -347,7 +349,7 @@ function drawFrame(run: Run, ts: number): void {
   run.lastTf = fr.tf;
   run.mode = m.scene.mode;
   const buf = run.block.write(m.scene, fr);
-  run.lastCounts = { trails: new Int32Array(buf, 32, 4)[1], ripples: new Int32Array(buf, 32, 4)[2] };
+  if (__SEEK_HOOK__) run.lastCounts = { trails: new Int32Array(buf, 32, 4)[1], ripples: new Int32Array(buf, 32, 4)[2] };
   if (!run.backend.draw(buf)) return;
   run.lastDraw = ts;
   run.prevScroll = scrollY;
@@ -423,7 +425,7 @@ function begin(run: Run): void {
       return;
     }
     if (run.pending) drawFrame(run, run.pendingTs); // the observer did not deliver last frame
-    if (held) return;
+    if (__SEEK_HOOK__ && held) return;
     const I = interval() || 1000 / 60;
     if (level() >= 3 && ts - run.lastDraw < FRAME_30 - I / 2) return; // rank 3: 30 fps
     run.pending = true;
@@ -444,7 +446,7 @@ function readRoute(): string {
 
 export async function start(root: HTMLElement, signal: AbortSignal): Promise<boolean> {
   const ok = await startRun(root, signal);
-  settle(ok);
+  if (__SEEK_HOOK__) settle(ok);
   return ok;
 }
 
@@ -494,8 +496,10 @@ async function startRun(root: HTMLElement, signal: AbortSignal): Promise<boolean
     if (current.backend.api === "webgpu") void recover(current);
   };
   // A-1 "Context loss": a lost WebGPU device is replaced from a new adapter and device; with no adapter the field falls
-  // back to WebGL2 on a new canvas, and the mask is re-uploaded. A re-requested software adapter declines (D-063), so the
-  // page then stays at tier 2. The canvas is hidden from the loss until its first draw, and the swap calls reset() (A-3).
+  // back to WebGL2 on a new canvas, and the mask is re-uploaded. A re-requested software adapter is treated as a null
+  // adapter (D-063, D-064 item 4), so recovery goes on to WebGL2, which applies its own D-063 SwiftShader check: a software
+  // WebGL2 declines and the page stays on tier 2, a hardware WebGL2 draws. The canvas is hidden from the loss until its first
+  // draw, and the swap calls reset() (A-3).
   const recover = async (run: Run): Promise<void> => {
     if (run.recovering) return;
     run.recovering = true;
@@ -584,7 +588,7 @@ async function startRun(root: HTMLElement, signal: AbortSignal): Promise<boolean
   return true;
 }
 
-// ---- The hook's view (test builds only reach it) ----
+// ---- The hook's view (built only under __SEEK_HOOK__: in a production build hookView() is a stub that returns null) ----
 
 export interface HookView {
   readonly backend: Backend;
@@ -603,6 +607,7 @@ export interface HookView {
 }
 
 export function hookView(): HookView | null {
+  if (!__SEEK_HOOK__) return null;
   const run = live;
   if (!run || !run.drawn) return null;
   return {
