@@ -19,8 +19,15 @@ const reset = (): void => {
   if (__SEEK_HOOK__) resets++;
   budgetReset();
 };
-/** The number of reset() calls this module has made (the seek hook reads it; test builds only). */
-export const resetCalls = (): number => (__SEEK_HOOK__ ? resets : 0);
+// Test builds only: the three exports below are assigned under __SEEK_HOOK__. A production build leaves them unassigned
+// (the loader imports this module as a namespace, so the bundler keeps the export names) and nothing calls them.
+/** The number of reset() calls this module has made (the seek hook reads it). */
+export let resetCalls: () => number;
+if (__SEEK_HOOK__) resetCalls = () => resets;
+/** Resolves true when the first frame is drawn, false when tier 3 declined. */
+export let started: Promise<boolean>;
+let settle!: (ok: boolean) => void;
+if (__SEEK_HOOK__) started = new Promise<boolean>((resolve) => { settle = resolve; });
 
 const REDUCED = "(prefers-reduced-motion: reduce)";
 const DARK = "(prefers-color-scheme: dark)";
@@ -67,18 +74,15 @@ interface Run {
   recovering: boolean; // a lost WebGPU device is being replaced
   gone: boolean; // finish(run, true) has run: nothing may be attached to it any more
   unsub: (() => void)[];
-  lastCounts: { trails: number; ripples: number };
+  lastCounts?: { trails: number; ripples: number }; // set only in test builds
 }
 
 let kept: Run | null = null; // the field while paused: hidden, ready to resume
 let live: Run | null = null; // the field that is drawing, or the one the hook holds
 let playedThisLoad = false; // the 404 plays its formation on every load
-// The four below are read or written only by the seek hook's view (hookView); every use is under __SEEK_HOOK__, so the
-// production chunk keeps none of them (vite-test-only-module).
-let held = false; // the hook has taken over the drawing
-let effectsMap: ((e: Effects) => Effects) | null = null;
-let settle: (ok: boolean) => void = () => {};
-const settled = __SEEK_HOOK__ ? new Promise<boolean>((resolve) => { settle = resolve; }) : Promise.resolve(false);
+// What the seek hook's view changes (hookView): every read is under __SEEK_HOOK__, so the production chunk keeps none of it
+// (vite-test-only-module). The names are distinct so that scripts/seek-markers.json can find a guard that was removed.
+const hookState: { heldByHook: boolean; effectsMap: ((e: Effects) => Effects) | null } = { heldByHook: false, effectsMap: null };
 
 // ---- Page measuring ----
 
@@ -129,7 +133,7 @@ export interface LayoutInfo {
 
 interface Measured {
   scene: Scene;
-  info: LayoutInfo;
+  info: LayoutInfo | null; // null in a production build
   maskCssRect: { rect: ReturnType<typeof maskRect>; text: string[] } | null;
 }
 
@@ -189,9 +193,10 @@ function measure(run: Run, cell: "auto" | number = "auto"): Measured {
     cta,
     col,
     mask,
-    effects: __SEEK_HOOK__ && effectsMap ? effectsMap(base) : base,
+    effects: __SEEK_HOOK__ && hookState.effectsMap ? hookState.effectsMap(base) : base,
   };
-  const info: LayoutInfo = {
+  // Only the seek hook reads the layout, so a production build does not build it.
+  const info: LayoutInfo | null = !__SEEK_HOOK__ ? null : {
     page: run.route,
     theme,
     D: geo.D,
@@ -425,7 +430,7 @@ function begin(run: Run): void {
       return;
     }
     if (run.pending) drawFrame(run, run.pendingTs); // the observer did not deliver last frame
-    if (__SEEK_HOOK__ && held) return;
+    if (__SEEK_HOOK__ && hookState.heldByHook) return;
     const I = interval() || 1000 / 60;
     if (level() >= 3 && ts - run.lastDraw < FRAME_30 - I / 2) return; // rank 3: 30 fps
     run.pending = true;
@@ -559,7 +564,7 @@ async function startRun(root: HTMLElement, signal: AbortSignal): Promise<boolean
     texts: [], textsDirty: true, range: document.createRange(), fontOk: false, geoKey: "", rasterKey: "", mode,
     tf0: page ? startTf(page, mode, introKey, playedThisLoad) : FORMATION_END, startTs: null, t0: 0, lastTf: -1,
     lastDraw: -1e9, prevScroll: scrollY, pending: false, pendingTs: 0, flip: false, raf: 0, trails: [], ripples: [],
-    drawn: false, lost: false, recovering: false, gone: false, unsub: [], lastCounts: { trails: 0, ripples: 0 },
+    drawn: false, lost: false, recovering: false, gone: false, unsub: [],
     ro: new ResizeObserver(() => { if (run.pending) drawFrame(run, run.pendingTs); }),
     mutation: new MutationObserver(() => { run.textsDirty = true; }),
   };
@@ -588,7 +593,7 @@ async function startRun(root: HTMLElement, signal: AbortSignal): Promise<boolean
   return true;
 }
 
-// ---- The hook's view (built only under __SEEK_HOOK__: in a production build hookView() is a stub that returns null) ----
+// ---- The hook's view (built only under __SEEK_HOOK__: a production build leaves hookView unassigned) ----
 
 export interface HookView {
   readonly backend: Backend;
@@ -606,8 +611,8 @@ export interface HookView {
   ready: Promise<boolean>;
 }
 
-export function hookView(): HookView | null {
-  if (!__SEEK_HOOK__) return null;
+export let hookView: () => HookView | null;
+if (__SEEK_HOOK__) hookView = () => {
   const run = live;
   if (!run || !run.drawn) return null;
   return {
@@ -615,15 +620,13 @@ export function hookView(): HookView | null {
     scene(tf) {
       const m = measure(run, tf === undefined ? "auto" : cellFor(run, tf));
       if (!applyGeometry(run, m)) throw new Error("the canvas cannot hold this page");
-      return { scene: m.scene, info: m.info };
+      return { scene: m.scene, info: m.info! };
     },
     write: (scene, fr) => run.block.write(scene, fr),
-    hold: (on) => { held = on; },
-    setEffects: (map) => { effectsMap = map; },
-    counts: () => run.lastCounts,
+    hold: (on) => { hookState.heldByHook = on; },
+    setEffects: (map) => { hookState.effectsMap = map; },
+    counts: () => run.lastCounts ?? { trails: 0, ripples: 0 },
     startTf: () => run.tf0,
-    ready: settled,
+    ready: started,
   };
-}
-
-export const started = settled;
+};
