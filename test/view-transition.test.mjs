@@ -92,8 +92,8 @@ const MORPHS = [
   { label: 'home to "This site" (the report)', link: '#this-site a[href="/report/"]', url: "/report/", card: "this-site" },
 ];
 
-async function open(browser, { reduce = false, paused = false, shift = false, start = "/" } = {}) {
-  const ctx = await browser.newContext({ reducedMotion: reduce ? "reduce" : "no-preference" });
+async function open(browser, { reduce = false, paused = false, shift = false, start = "/", viewport = undefined } = {}) {
+  const ctx = await browser.newContext({ reducedMotion: reduce ? "reduce" : "no-preference", viewport });
   const page = await ctx.newPage();
   const problems = [];
   page.on("console", (m) => { if (isProblem(m)) problems.push(`${m.type()}: ${m.text()}`); });
@@ -176,6 +176,16 @@ const FLAT_TREE = ["view-transition", ...["root", ...PAIRS].flatMap((n) => [
   `      view-transition-new(${n})`,
 ])];
 
+/**
+ * The href of every <link> in the markup that loads a stylesheet (G-69): rel holds the token "stylesheet", so
+ * rel="alternate stylesheet" counts, and the href may be double-quoted, single-quoted or unquoted.
+ */
+const stylesheetHrefs = (markup) => [...markup.matchAll(/<link\b[^>]*>/g)].map((m) => m[0])
+  .filter((tag) => /\brel=(?:"[^"]*\bstylesheet\b[^"]*"|'[^']*\bstylesheet\b[^']*'|stylesheet\b)/i.test(tag))
+  .map((tag) => tag.match(/\bhref=(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/i))
+  .filter(Boolean)
+  .map((m) => m[1] ?? m[2] ?? m[3]);
+
 /** Goes from home to the certway page by its card and waits until that page is quiet, so that Back has a page to return to. */
 async function visitCertway(page) {
   await page.click(MORPHS[0].link);
@@ -253,6 +263,46 @@ describe("cross-document transition in chromium", () => {
       assert.deepEqual(problems, []);
       await ctx.close();
     });
+  }
+
+  // (a) The title is legible mid-morph (T-037, G-69; reference cross-document-view-transitions-text-morphs section 3): paused at
+  // ready, the glyphs of the old h3 image and of the new h1 image are the same size. The old image shows the h3's whole line
+  // box, 1.25 x its font size, so its glyph height is its height / 1.25; the new image shows all of the h1's lines, one font size
+  // each, so its glyph height is its height / lines. Without src/style.css's title rules the two images are scaled to the group's
+  // width and differ about 2x (the reference measured 1 line at 1280 px; 2 lines at 390 px). The reference gives no numeric
+  // tolerance: it measured 69.1 px against 69.1 px, so 2 % leaves room for rounding and stays far from the 2x defect.
+  const H3_LINE_HEIGHT = 1.25;
+  const GLYPH_TOLERANCE = 0.02;
+  const TITLE_VIEWPORTS = [{ label: "1280 px wide", viewport: { width: 1280, height: 800 } }, { label: "390 px wide", viewport: { width: 390, height: 844 } }];
+  for (const m of MORPHS) {
+    for (const v of TITLE_VIEWPORTS) {
+      test(`(a) ${m.label} at ${v.label}: paused at ready, the old and new title images carry glyphs of one size`, async () => {
+        const { ctx, page, problems } = await open(browser, { viewport: v.viewport });
+        await page.evaluate(() => sessionStorage.setItem("__pause", "1"));
+        await page.click(m.link);
+        await page.waitForURL((u) => u.pathname === m.url);
+        await page.waitForFunction(() => window.__vtPaused === true
+          || JSON.parse(sessionStorage.getItem("__vt") || "[]").some((e) => e.ev === "pagereveal" && !e.vt));
+        assert.equal(await page.evaluate(() => window.__vtPaused === true), true, "the transition became ready and paused");
+        const t = await page.evaluate(() => {
+          const px = (pseudo, prop) => parseFloat(getComputedStyle(document.documentElement, pseudo)[prop]);
+          const h1 = document.querySelector(".band > h1");
+          return {
+            lines: Math.max(1, Math.round(h1.getBoundingClientRect().height / parseFloat(getComputedStyle(h1).lineHeight))),
+            oldHeight: px("::view-transition-old(case-title)", "height"),
+            newHeight: px("::view-transition-new(case-title)", "height"),
+          };
+        });
+        assert.ok(t.oldHeight > 0 && t.newHeight > 0, `both title images have a height: ${JSON.stringify(t)}`);
+        const oldGlyph = t.oldHeight / H3_LINE_HEIGHT, newGlyph = t.newHeight / t.lines;
+        assert.ok(Math.abs(oldGlyph / newGlyph - 1) <= GLYPH_TOLERANCE,
+          `glyph height of the old image ${oldGlyph.toFixed(2)} px against the new ${newGlyph.toFixed(2)} px (${t.lines} line(s)): ${JSON.stringify(t)}`);
+        await page.evaluate(() => { sessionStorage.removeItem("__pause"); for (const a of document.getAnimations()) a.play(); });
+        await settle(page, m.url);
+        assert.deepEqual(problems, []);
+        await ctx.close();
+      });
+    }
   }
 
   // (b) Every other navigation: the 0.25 s root crossfade and no name on any element.
@@ -360,14 +410,23 @@ describe("cross-document transition in chromium", () => {
     // All four pages: no <style> in the markup holds the opt-in and no linked stylesheet does either; only the script inserts it.
     for (const file of ["index.html", "projects/certway/index.html", "report/index.html", "404.html"]) {
       const page = html(file);
-      const sheets = [...page.matchAll(/<link\b[^>]*>/g)].map((m) => m[0])
-        .filter((tag) => /\brel="?stylesheet"?/.test(tag))
-        .map((tag) => tag.match(/\bhref="([^"]+)"/)?.[1])
-        .filter(Boolean);
+      const sheets = stylesheetHrefs(page);
       assert.ok(sheets.length > 0, `${file} links its stylesheet`);
       assert.ok(!/<style[^>]*>[^<]*@view-transition/.test(page), `${file}: no <style> of the markup holds the opt-in`);
       for (const href of sheets) assert.ok(!/@view-transition/.test(readFileSync(dist(href.replace(/^\//, "")), "utf8")), `${file}: ${href} holds no opt-in`);
     }
+  });
+
+  // G-69: case (h)'s stylesheet filter must not miss a stylesheet that could carry the opt-in. The first two fixtures are
+  // ones the earlier filter (rel="?stylesheet"? and a double-quoted href only) returned nothing for.
+  test("(h) the stylesheet filter catches an unquoted href", () => {
+    assert.deepEqual(stylesheetHrefs('<link rel="stylesheet" href=/assets/unquoted.css>'), ["/assets/unquoted.css"]);
+  });
+  test("(h) the stylesheet filter catches rel=\"alternate stylesheet\"", () => {
+    assert.deepEqual(stylesheetHrefs('<link rel="alternate stylesheet" href="/assets/alternate.css" title="alt">'), ["/assets/alternate.css"]);
+  });
+  test("(h) the stylesheet filter keeps a quoted stylesheet and skips other links", () => {
+    assert.deepEqual(stylesheetHrefs('<link rel="stylesheet" crossorigin href="/assets/quoted.css"><link rel="icon" href="/favicon.ico">'), ["/assets/quoted.css"]);
   });
 
   // (e) skipTransition() is followed by a handled ready rejection: no unhandled rejection and no console error.
